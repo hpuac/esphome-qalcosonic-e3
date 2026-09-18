@@ -1,4 +1,5 @@
 """Exercise nested entity defaults and UART validation using real ESPHome."""
+import base64
 from pathlib import Path
 import subprocess
 import sys
@@ -6,7 +7,21 @@ import tempfile
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-config = yaml.safe_load((ROOT / "tests/esp32-c6.yaml").read_text())
+
+
+class TestConfigLoader(yaml.SafeLoader):
+    pass
+
+
+TEST_SECRETS = {
+    "wifi_ssid": "test-network",
+    "wifi_password": "test-password",
+    "heat_meter__encryption_key": base64.b64encode(bytes(range(32))).decode(),
+}
+TestConfigLoader.add_constructor(
+    "!secret", lambda loader, node: TEST_SECRETS[loader.construct_scalar(node)]
+)
+config = yaml.load((ROOT / "tests/esp32-c6.yaml").read_text(), Loader=TestConfigLoader)
 config["external_components"][0]["source"]["path"] = str(ROOT / "components")
 
 

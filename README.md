@@ -30,9 +30,8 @@ The meter protocol and decoded data set remain specific to the QALCOSONIC E3.
 
 ## Installation and configuration
 
-Create `secrets.yaml` with `wifi_ssid` and `wifi_password`, then use the following
-configuration. It enables the main measurements, readout status, and manual read
-button:
+The following configuration enables the main measurements, readout
+status, and manual read button:
 
 ```yaml
 esphome:
@@ -45,9 +44,15 @@ esp32:
     type: esp-idf
 
 logger:
+
 api:
+  encryption:
+    key: !secret heat_meter__encryption_key
+
 ota:
   - platform: esphome
+    encryption:
+
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
@@ -234,7 +239,10 @@ python3 -m venv .venv
 .venv/bin/esphome compile tests/esp32-c6.yaml
 ```
 
-The test configuration uses local component sources and dummy Wi-Fi credentials.
+The test configuration uses local component sources. For the direct ESPHome
+commands, provide `wifi_ssid`, `wifi_password`, and `heat_meter__encryption_key`
+in `tests/secrets.yaml`.
+The Python schema tests supply dummy secrets automatically.
 
 ## License
 
