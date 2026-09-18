@@ -1,0 +1,72 @@
+esphome:
+  name: heat-meter
+
+esp32:
+  variant: esp32c6
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+logger:
+api:
+ota:
+  - platform: esphome
+wifi:
+  ssid: "test-network"
+  password: "test-password"
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [qalcosonic_e3]
+
+uart:
+  id: mbus_uart
+  rx_pin: GPIO2
+  tx_pin: GPIO3
+  baud_rate: 2400
+  data_bits: 8
+  parity: EVEN
+  stop_bits: 1
+  rx_buffer_size: 512
+
+qalcosonic_e3:
+  uart_id: mbus_uart
+  update_interval: 2min
+  energy:
+    name: "Energy"
+  volume:
+    name: "Volume"
+  power:
+    name: "Power"
+  flow:
+    name: "Flow"
+  flow_temperature:
+    name: "Flow Temperature"
+  return_temperature:
+    name: "Return Temperature"
+  temperature_difference:
+    name: "Temperature Difference"
+  error_code:
+    name: "Error Code"
+  battery_operating_duration:
+    name: "Battery Operating Duration"
+  operating_time_without_error:
+    name: "Operating Time Without Error"
+  protocol_version:
+    name: "Protocol Version"
+  readout_failures:
+    name: "Readout Failures Since Reboot"
+  meter_datetime:
+    name: "Meter Date and Time"
+  error_start:
+    name: "Error Start"
+  serial_number:
+    name: "Serial Number"
+  manufacturer:
+    name: "Manufacturer"
+  readout_successful:
+    name: "Readout Successful"
+  read_now:
+    name: "Read Now"
