@@ -1,5 +1,4 @@
 """Exercise nested entity defaults and UART validation using real ESPHome."""
-import base64
 from pathlib import Path
 import subprocess
 import sys
@@ -13,11 +12,7 @@ class TestConfigLoader(yaml.SafeLoader):
     pass
 
 
-TEST_SECRETS = {
-    "wifi_ssid": "test-network",
-    "wifi_password": "test-password",
-    "heat_meter__encryption_key": base64.b64encode(bytes(range(32))).decode(),
-}
+TEST_SECRETS = yaml.safe_load((ROOT / "tests/secrets.yaml").read_text())
 TestConfigLoader.add_constructor(
     "!secret", lambda loader, node: TEST_SECRETS[loader.construct_scalar(node)]
 )

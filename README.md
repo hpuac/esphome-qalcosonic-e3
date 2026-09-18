@@ -239,10 +239,39 @@ python3 -m venv .venv
 .venv/bin/esphome compile tests/esp32-c6.yaml
 ```
 
-The test configuration uses local component sources. For the direct ESPHome
-commands, provide `wifi_ssid`, `wifi_password`, and `heat_meter__encryption_key`
-in `tests/secrets.yaml`.
-The Python schema tests supply dummy secrets automatically.
+The test configuration uses local component sources. The included
+[`tests/secrets.yaml`](tests/secrets.yaml) supplies public dummy credentials for
+the schema tests, direct ESPHome commands, and CI; no manual secrets setup is
+needed. Keep these test values unchanged and use a separate ignored secrets file
+for real device credentials.
+
+### GitHub Actions
+
+[Tests](.github/workflows/tests.yml) runs the parser/receiver tests, schema tests,
+configuration validation, and ESP32-C6 firmware build for pull requests targeting
+`main` and pushes to `main`. It uses Python 3.14 and the ESPHome version pinned in
+`requirements-dev.txt`. Build credentials are dummy values; no repository secrets
+are needed.
+
+The workflow uses GitHub-hosted runners, a read-only token, checkout without
+persisted credentials, and actions pinned to commit hashes. Each run has a
+20-minute job limit, and new commits cancel older runs for the same PR or branch.
+It does not publish firmware or use shared dependency/build caches.
+
+Before enabling fork PR runs, configure **Settings → Actions → General**:
+
+- Under approval for fork pull request workflows, select **Require approval for
+  all external contributors** (also called **all outside collaborators**).
+  Review changes to workflows, scripts, and dependencies before approving runs.
+- Keep default workflow permissions read-only and **Allow GitHub Actions to
+  create and approve pull requests** disabled.
+
+The approval policy is a repository setting, not something this YAML can enforce.
+PR authors can modify workflows, including their timeouts, so the timeout alone
+does not prevent compute abuse. Use `pull_request`, never `pull_request_target`,
+to run contributed code, and do not attach self-hosted runners to this workflow.
+See [GitHub's Actions settings guidance](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)
+and [secure use reference](https://docs.github.com/en/actions/reference/security/secure-use).
 
 ## License
 
