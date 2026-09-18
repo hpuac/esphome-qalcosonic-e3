@@ -2,3 +2,10 @@
 .esphome/
 __pycache__/
 secrets.yaml
+
+# Private device configurations
+*.local.yaml
+
+# JetBrains IDE files
+.idea/
+*.iml
