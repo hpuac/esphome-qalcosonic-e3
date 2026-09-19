@@ -113,9 +113,11 @@ bool FrameReceiver::push(uint8_t byte, MeterData &result, FrameResult &error) {
       this->clear();
       return true;
     }
-    if (status == FrameResult::INCOMPLETE)
-      keep = std::min(keep, i);
-    else
+    if (status == FrameResult::INCOMPLETE) keep = std::min(keep, i);
+    // Later starts may be the header's second 0x68 or payload bytes of an
+    // incomplete frame. Keep scanning for recovery, but do not report their
+    // errors or let them overwrite an earlier candidate's actual error.
+    else if (keep == this->size_ && error == FrameResult::INCOMPLETE)
       error = status;
   }
   if (keep != 0) {
