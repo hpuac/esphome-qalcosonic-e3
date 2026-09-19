@@ -75,6 +75,36 @@ int main(int argc, char **argv) {
   assert(parse_frame(bad.data(), bad.size(), data) == FrameResult::OK && !data.volume.present);
   FrameReceiver receiver;
   FrameResult error;
+  // A valid frame's second 0x68 (and any payload 0x68) is not a malformed frame.
+  auto expect_clean_frame = [&](const std::vector<uint8_t> &bytes) {
+    receiver.clear();
+    for (size_t i = 0; i < bytes.size(); ++i) {
+      const bool complete = receiver.push(bytes[i], data, error);
+      assert(complete == (i + 1 == bytes.size()));
+      if (!complete) assert(error == FrameResult::INCOMPLETE);
+    }
+  };
+  expect_clean_frame(frame);
+  bad = frame;
+  bad[50] = 0x68;
+  checksum(bad);
+  expect_clean_frame(bad);
+  // Real errors at the leading candidate must still be reported.
+  bad = frame;
+  bad[2]++;
+  for (size_t i = 0; i < 4; ++i) assert(!receiver.push(bad[i], data, error));
+  assert(error == FrameResult::MALFORMED);
+  receiver.clear();
+  bad = frame;
+  bad[50] ^= 1;
+  for (uint8_t b : bad) assert(!receiver.push(b, data, error));
+  assert(error == FrameResult::CHECKSUM);
+  receiver.clear();
+  bad = frame;
+  bad.back() = 0;
+  for (uint8_t b : bad) assert(!receiver.push(b, data, error));
+  assert(error == FrameResult::INVALID_STOP);
+  receiver.clear();
   for (unsigned i = 0; i < 10000; ++i) {
     assert(!receiver.push(0xE5, data, error));
     assert(receiver.size() <= 261);
