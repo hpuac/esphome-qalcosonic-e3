@@ -1,7 +1,9 @@
 #include "qalcosonic_e3.h"
+
+#include <limits>
+
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
-#include <limits>
 
 namespace esphome {
 namespace qalcosonic_e3 {
@@ -60,22 +62,17 @@ void QalcosonicE3::loop() {
 }
 
 void QalcosonicE3::publish_(const MeterData &data) {
-  if (this->energy_ != nullptr && data.energy.present)
-    this->energy_->publish_state(data.energy.value);
-  if (this->volume_ != nullptr && data.volume.present)
-    this->volume_->publish_state(data.volume.value);
-  if (this->power_ != nullptr && data.power.present)
-    this->power_->publish_state(data.power.value);
-  if (this->flow_ != nullptr && data.flow.present)
-    this->flow_->publish_state(data.flow.value);
+  if (this->energy_ != nullptr && data.energy.present) this->energy_->publish_state(data.energy.value);
+  if (this->volume_ != nullptr && data.volume.present) this->volume_->publish_state(data.volume.value);
+  if (this->power_ != nullptr && data.power.present) this->power_->publish_state(data.power.value);
+  if (this->flow_ != nullptr && data.flow.present) this->flow_->publish_state(data.flow.value);
   if (this->flow_temperature_ != nullptr && data.flow_temperature.present)
     this->flow_temperature_->publish_state(data.flow_temperature.value);
   if (this->return_temperature_ != nullptr && data.return_temperature.present)
     this->return_temperature_->publish_state(data.return_temperature.value);
   if (this->temperature_difference_ != nullptr && data.temperature_difference.present)
     this->temperature_difference_->publish_state(data.temperature_difference.value);
-  if (this->error_code_ != nullptr && data.error_code.present)
-    this->error_code_->publish_state(data.error_code.value);
+  if (this->error_code_ != nullptr && data.error_code.present) this->error_code_->publish_state(data.error_code.value);
   if (this->battery_operating_duration_ != nullptr && data.battery_operating_duration.present)
     this->battery_operating_duration_->publish_state(data.battery_operating_duration.value);
   if (this->operating_time_without_error_ != nullptr && data.operating_time_without_error.present)

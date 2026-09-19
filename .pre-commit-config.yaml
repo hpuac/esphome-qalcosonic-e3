@@ -1,0 +1,33 @@
+minimum_pre_commit_version: "4.6.2"
+
+repos:
+  - repo: local
+    hooks:
+      - id: clang-format
+        name: clang-format
+        language: python
+        additional_dependencies: [clang-format==23.1.1]
+        entry: clang-format -i --style=file
+        types_or: [c++, c]
+
+      - id: ruff-format
+        name: ruff format
+        language: python
+        additional_dependencies: [ruff==0.16.8]
+        entry: ruff format
+        types_or: [python, pyi]
+
+      - id: shfmt
+        name: shfmt
+        language: python
+        additional_dependencies: [shfmt-py==4.2.0]
+        entry: shfmt -w
+        types: [shell]
+
+      - id: prettier
+        name: prettier
+        language: node
+        language_version: "24.21.0"
+        additional_dependencies: [prettier@3.9.8]
+        entry: prettier --write
+        types_or: [markdown, yaml, json]

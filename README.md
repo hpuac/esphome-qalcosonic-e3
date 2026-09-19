@@ -8,25 +8,16 @@ M-Bus interface through a TTL optical read/write head.
 
 ## Hardware
 
-The setup described here uses an **Axioma QALCOSONIC E3** heat meter with
-these parts:
+The tested setup uses an **Axioma QALCOSONIC E3**, a **Waveshare ESP32-C6-Zero**
+with 8 MB flash, and a **TTL optical read/write head** powered from 3.3 V.
 
-| Part | Details | Product link |
-| --- | --- | --- |
-| TTL IR read/write head with ring magnet | Assembled RX/TX board with IR LED and phototransistor; 3.3–5 V supply, powered from **3.3 V** in this setup; 26 mm board outer diameter, 6.5 mm diode spacing (center to center), and 27/16/5 mm ring magnet | [eBay item 356650595031](https://www.ebay.de/itm/356650595031) |
-| Waveshare ESP32-C6-Zero, without pin headers | ESP32-C6FH8 with 8 MB flash, USB-C, and onboard ceramic antenna; running ESPHome with ESP-IDF | [Amazon product B0F12PRH9G](https://www.amazon.de/dp/B0F12PRH9G) |
+- [TTL IR read/write head](https://www.ebay.de/itm/356650595031)
+- [Waveshare ESP32-C6-Zero](https://www.amazon.de/dp/B0F12PRH9G)
 
-These parts were chosen to fit inside a very small, custom-designed 3D-printed
-case. The optical head is the **TTL RX/TX read/write version**, supplied with a
-27 mm ring magnet. Communication uses **2400 baud, 8E1**.
-
-The component is not tied to these particular products. Other ESPHome-supported
-boards and compatible TTL optical read/write heads should work when configured
-with the same UART settings and appropriate pins. Use a head that supports both
-transmitting requests and receiving responses, with UART logic levels compatible
-with the board. Adjust the ESPHome board configuration and wiring for your hardware.
-
-The meter protocol and decoded data set remain specific to the QALCOSONIC E3.
+Other ESPHome-supported boards and compatible TTL heads should work with the
+appropriate board configuration and wiring. The head must support both sending
+and receiving, with logic levels compatible with the board. Communication uses
+**2400 baud, 8E1**. The decoded data is specific to the QALCOSONIC E3.
 
 ## Installation and configuration
 
@@ -61,9 +52,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/hpuac/esphome-qalcosonic-e3.git
-      # ref: refs/pull/1/head  # Replace 1 with the PR number to test.
     components: [qalcosonic_e3]
-    # refresh: 1min  # Enable while testing remote changes.
 
 uart:
   id: mbus_uart
@@ -98,10 +87,8 @@ qalcosonic_e3:
     name: "Read Now"
 ```
 
-To test a pull request, uncomment `ref` and set its PR number. Uncomment
-`refresh: 1min` to check for remote changes more frequently when running ESPHome.
-Compile and flash again to apply changes to the device; this does not enable
-automatic firmware updates.
+Add your Wi-Fi credentials and API encryption key to `secrets.yaml`, and adjust
+the board and GPIO pins for your hardware.
 
 [The full example](examples/esp32-c6.yaml) includes every optional entity.
 Each nested entity can be omitted, renamed, or configured with normal ESPHome
@@ -117,32 +104,18 @@ qalcosonic_e3:
     name: "Error Code"
     disabled_by_default: false
 ```
+
 The component requires both UART pins and validates 2400 baud, 8 data bits,
 even parity, and 1 stop bit. Use a dedicated UART with a 512-byte RX buffer.
 
-For a local checkout, replace the Git source with:
-
-```yaml
-external_components:
-  - source:
-      type: local
-      path: components
-    components: [qalcosonic_e3]
-```
-
-The path is relative to your device YAML. ESPHome's supported external component
-layout and UART integration are described in the
-[external components documentation](https://esphome.io/components/external_components/)
-and [UART developer documentation](https://developers.esphome.io/architecture/components/uart/).
-
 ## Wiring
 
-| ESP32 | TTL optical head |
-| --- | --- |
-| 3.3 V | VCC |
-| GND | GND |
-| GPIO2 (RX) | TX → ESP RX |
-| GPIO3 (TX) | RX ← ESP TX |
+| ESP32      | TTL optical head |
+| ---------- | ---------------- |
+| 3.3 V      | VCC              |
+| GND        | GND              |
+| GPIO2 (RX) | TX → ESP RX      |
+| GPIO3 (TX) | RX ← ESP TX      |
 
 Pins are configurable. This is M-Bus, **not SML**. The component reads optical M-Bus through a
 TTL head. The wired M-Bus interface uses the same high-level
@@ -152,43 +125,38 @@ meter's M-Bus wires directly to ESP GPIO.
 ## Optical interface and polling
 
 The optical interface goes inactive after approximately **5 minutes without
-communication**. After it sleeps,
-it requires local activation at the meter before communication resumes.
+communication**. After it sleeps, it requires local activation at the meter before communication resumes.
 The default **2-minute** polling interval intentionally keeps it awake. Use an
 interval below the inactivity timeout for continuous availability. Battery-current
 consumption has not been measured, so no battery-life impact is quantified.
 
-The first request runs approximately 10 seconds after component setup. Subsequent
-requests follow `update_interval` (2 minutes by default). `read_now` uses the same path. Requests during startup or an outstanding
-read are ignored. Every request sends only `10 5B 01 5C 16` (REQ_UD2, address 1).
-There are no configuration writes, retries, test selections, or high-resolution
-experimental entities.
+The first reading starts about 10 seconds after startup. Use `update_interval`
+to change the polling interval or `read_now` to request a reading manually.
+The component only reads meter data; it does not change meter settings.
 
 ## Entities
 
-| Entity key | Type | Unit | Default | Category |
-| --- | --- | --- | --- | --- |
-| `energy` | Sensor | MWh | Enabled | Normal |
-| `volume` | Sensor | m³ | Enabled | Normal |
-| `power` | Sensor | kW | Enabled | Normal |
-| `flow` | Sensor | m³/h | Enabled | Normal |
-| `flow_temperature` | Sensor | °C | Enabled | Normal |
-| `return_temperature` | Sensor | °C | Enabled | Normal |
-| `temperature_difference` | Sensor | K | Enabled | Normal |
-| `error_code` | Sensor | — | Disabled | Diagnostic |
-| `battery_operating_duration` | Sensor | d | Disabled | Diagnostic |
-| `operating_time_without_error` | Sensor | d | Disabled | Diagnostic |
-| `protocol_version` | Sensor | — | Disabled | Diagnostic |
-| `meter_datetime` | Text sensor | — | Disabled | Diagnostic |
-| `error_start` | Text sensor | — | Disabled | Diagnostic |
-| `serial_number` | Text sensor | — | Disabled | Diagnostic |
-| `manufacturer` | Text sensor | — | Disabled | Diagnostic |
-| `readout_successful` | Binary sensor | — | Enabled | Diagnostic |
-| `readout_failures` | Sensor | — | Disabled | Diagnostic |
-| `read_now` | Button | — | Enabled | Config |
+| Entity key                     | Type          | Unit | Default  | Category   |
+| ------------------------------ | ------------- | ---- | -------- | ---------- |
+| `energy`                       | Sensor        | MWh  | Enabled  | Normal     |
+| `volume`                       | Sensor        | m³   | Enabled  | Normal     |
+| `power`                        | Sensor        | kW   | Enabled  | Normal     |
+| `flow`                         | Sensor        | m³/h | Enabled  | Normal     |
+| `flow_temperature`             | Sensor        | °C   | Enabled  | Normal     |
+| `return_temperature`           | Sensor        | °C   | Enabled  | Normal     |
+| `temperature_difference`       | Sensor        | K    | Enabled  | Normal     |
+| `error_code`                   | Sensor        | —    | Disabled | Diagnostic |
+| `battery_operating_duration`   | Sensor        | d    | Disabled | Diagnostic |
+| `operating_time_without_error` | Sensor        | d    | Disabled | Diagnostic |
+| `protocol_version`             | Sensor        | —    | Disabled | Diagnostic |
+| `meter_datetime`               | Text sensor   | —    | Disabled | Diagnostic |
+| `error_start`                  | Text sensor   | —    | Disabled | Diagnostic |
+| `serial_number`                | Text sensor   | —    | Disabled | Diagnostic |
+| `manufacturer`                 | Text sensor   | —    | Disabled | Diagnostic |
+| `readout_successful`           | Binary sensor | —    | Enabled  | Diagnostic |
+| `readout_failures`             | Sensor        | —    | Disabled | Diagnostic |
+| `read_now`                     | Button        | —    | Enabled  | Config     |
 
-Energy and volume use `total_increasing`; other main measurements use
-`measurement`. Volume uses the `water` device class.
 Battery operating duration is **elapsed operating time**, not percentage or
 remaining battery life.
 
@@ -196,82 +164,14 @@ Meter error code and error start describe the meter itself. Error start is
 `No error` when the error code is zero; otherwise dates use `YYYY-MM-DD HH:MM`,
 without timezone conversion. Missing records leave existing states unchanged.
 
-Readout success describes communication: true after a complete checksum-valid
-CI `0x72` response with a full variable-data header during a pending request;
-false after a 2-second timeout. It stays unknown until the first outcome.
-Invalid frames do not end the request early. Failures start at zero on boot,
-are never restored, and do not reset on success. The counter uses `total` and
-integer display.
+`readout_successful` reports whether the last read succeeded and stays unknown
+until the first result. A read times out after 2 seconds. `readout_failures`
+counts failed reads since boot and resets when the ESP restarts. Missing
+readings do not clear previously reported measurements.
 
-## Development
+## Contributing
 
-The component lives in `components/qalcosonic_e3/`. Python schemas define the
-optional entities; C++ handles non-blocking UART reception, validation, parsing,
-and publishing. The parser uses a bounded 261-byte receive buffer and decodes
-the meter's normal DIF/VIF records.
-
-Tests cover the captured meter response, decoded values, checksum validation,
-malformed frames, incremental reception, and configuration schemas. The fixture
-is anonymized: both the header ID and serial number record use `01234567`, and
-both the `02 7F` CRC record and M-Bus frame checksum have been recalculated.
-The fixture CRC uses the algorithm in section 3.3 of the
-[Axioma M-Bus protocol](https://instrumentteam.no/wp-content/uploads/2025/02/QSE3_E4_Mbus_190410.pdf),
-with initial value `0xFFFF`, no final XOR, and coverage of the data records
-excluding the CRC record, as verified against the original capture. The component
-continues to validate the M-Bus frame checksum without enforcing the record CRC.
-
-Run parser and receiver tests with a C++17 compiler (UndefinedBehaviorSanitizer
-enabled by default):
-
-```sh
-./tests/run.sh
-# Optional, on platforms with a working AddressSanitizer runtime:
-SANITIZERS=address,undefined ./tests/run.sh
-```
-
-Validate and build against ESPHome (development verification uses 2026.9.0):
-
-```sh
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python tests/test_config.py
-.venv/bin/esphome config tests/esp32-c6.yaml
-.venv/bin/esphome compile tests/esp32-c6.yaml
-```
-
-The test configuration uses local component sources. The included
-[`tests/secrets.yaml`](tests/secrets.yaml) supplies public dummy credentials for
-the schema tests, direct ESPHome commands, and CI; no manual secrets setup is
-needed. Keep these test values unchanged and use a separate ignored secrets file
-for real device credentials.
-
-### GitHub Actions
-
-[Tests](.github/workflows/tests.yml) runs the parser/receiver tests, schema tests,
-configuration validation, and ESP32-C6 firmware build for pull requests targeting
-`main` and pushes to `main`. It uses Python 3.14 and the ESPHome version pinned in
-`requirements-dev.txt`. Build credentials are dummy values; no repository secrets
-are needed.
-
-The workflow uses GitHub-hosted runners, a read-only token, checkout without
-persisted credentials, and actions pinned to commit hashes. Each run has a
-20-minute job limit, and new commits cancel older runs for the same PR or branch.
-It does not publish firmware or use shared dependency/build caches.
-
-Before enabling fork PR runs, configure **Settings → Actions → General**:
-
-- Under approval for fork pull request workflows, select **Require approval for
-  all external contributors** (also called **all outside collaborators**).
-  Review changes to workflows, scripts, and dependencies before approving runs.
-- Keep default workflow permissions read-only and **Allow GitHub Actions to
-  create and approve pull requests** disabled.
-
-The approval policy is a repository setting, not something this YAML can enforce.
-PR authors can modify workflows, including their timeouts, so the timeout alone
-does not prevent compute abuse. Use `pull_request`, never `pull_request_target`,
-to run contributed code, and do not attach self-hosted runners to this workflow.
-See [GitHub's Actions settings guidance](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)
-and [secure use reference](https://docs.github.com/en/actions/reference/security/secure-use).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development, tests, and formatting.
 
 ## License
 
