@@ -9,10 +9,14 @@ namespace esphome {
 namespace qalcosonic_e3 {
 
 // Optional values keep missing records from overwriting previous entity states.
-template<typename T> struct Value {
+template <typename T>
+struct Value {
   bool present{false};
   T value{};
-  void set(T v) { this->value = v; this->present = true; }
+  void set(T v) {
+    this->value = v;
+    this->present = true;
+  }
 };
 
 struct MeterData {
@@ -36,6 +40,7 @@ class FrameReceiver {
   bool push(uint8_t byte, MeterData &result, FrameResult &error);
   void clear() { this->size_ = 0; }
   size_t size() const { return this->size_; }
+
  protected:
   std::array<uint8_t, 261> buffer_{};
   size_t size_{0};

@@ -1,4 +1,5 @@
 """Exercise nested entity defaults and UART validation using real ESPHome."""
+
 from pathlib import Path
 import subprocess
 import sys
@@ -13,9 +14,7 @@ class TestConfigLoader(yaml.SafeLoader):
 
 
 TEST_SECRETS = yaml.safe_load((ROOT / "tests/secrets.yaml").read_text())
-TestConfigLoader.add_constructor(
-    "!secret", lambda loader, node: TEST_SECRETS[loader.construct_scalar(node)]
-)
+TestConfigLoader.add_constructor("!secret", lambda loader, node: TEST_SECRETS[loader.construct_scalar(node)])
 config = yaml.load((ROOT / "tests/esp32-c6.yaml").read_text(), Loader=TestConfigLoader)
 config["external_components"][0]["source"]["path"] = str(ROOT / "components")
 
@@ -26,7 +25,9 @@ def validate(value, expected=True):
         path.write_text(yaml.safe_dump(value))
         result = subprocess.run(
             [sys.executable, "-m", "esphome", "config", str(path)],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         assert (result.returncode == 0) == expected, result.stdout + result.stderr
         return yaml.safe_load(result.stdout) if expected else None

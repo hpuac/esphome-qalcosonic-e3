@@ -7,31 +7,35 @@
 namespace esphome {
 namespace qalcosonic_e3 {
 namespace {
-uint16_t read_u16(const uint8_t *p) {
-  return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
-}
+uint16_t read_u16(const uint8_t *p) { return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8); }
 uint32_t read_u32(const uint8_t *p) {
-  return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-         (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+  return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2]) << 16) |
+         (static_cast<uint32_t>(p[3]) << 24);
 }
 std::string datetime(const uint8_t *p) {
   const unsigned year = 2000U + ((p[2] >> 5) & 7U) + ((p[3] >> 4) & 15U) * 8U;
   char text[20];
-  std::snprintf(text, sizeof(text), "%04u-%02u-%02u %02u:%02u", year,
-                p[3] & 15U, p[2] & 31U, p[1] & 31U, p[0] & 63U);
+  std::snprintf(text, sizeof(text), "%04u-%02u-%02u %02u:%02u", year, p[3] & 15U, p[2] & 31U, p[1] & 31U, p[0] & 63U);
   return text;
 }
 }  // namespace
 
 const char *frame_result_message(FrameResult result) {
   switch (result) {
-    case FrameResult::OK: return "Frame processed successfully";
-    case FrameResult::INCOMPLETE: return "Incomplete M-Bus frame";
-    case FrameResult::MALFORMED: return "Malformed M-Bus long frame";
-    case FrameResult::INVALID_STOP: return "Invalid M-Bus stop byte";
-    case FrameResult::CHECKSUM: return "M-Bus checksum mismatch";
-    case FrameResult::UNEXPECTED_CI: return "Unexpected M-Bus CI field";
-    case FrameResult::SHORT_HEADER: return "RSP_UD2 header is too short";
+    case FrameResult::OK:
+      return "Frame processed successfully";
+    case FrameResult::INCOMPLETE:
+      return "Incomplete M-Bus frame";
+    case FrameResult::MALFORMED:
+      return "Malformed M-Bus long frame";
+    case FrameResult::INVALID_STOP:
+      return "Invalid M-Bus stop byte";
+    case FrameResult::CHECKSUM:
+      return "M-Bus checksum mismatch";
+    case FrameResult::UNEXPECTED_CI:
+      return "Unexpected M-Bus CI field";
+    case FrameResult::SHORT_HEADER:
+      return "RSP_UD2 header is too short";
   }
   return "Invalid M-Bus frame";
 }
@@ -55,8 +59,7 @@ FrameResult parse_frame(const uint8_t *data, size_t size, MeterData &result) {
                 static_cast<unsigned>(data[9]), static_cast<unsigned>(data[8]), static_cast<unsigned>(data[7]));
   decoded.serial_number = serial;
   const uint16_t man = read_u16(data + 11);
-  char manufacturer[4] = {static_cast<char>(((man >> 10) & 31) + 64),
-                          static_cast<char>(((man >> 5) & 31) + 64),
+  char manufacturer[4] = {static_cast<char>(((man >> 10) & 31) + 64), static_cast<char>(((man >> 5) & 31) + 64),
                           static_cast<char>((man & 31) + 64), '\0'};
   decoded.manufacturer = manufacturer;
   decoded.protocol_version = data[13];
@@ -75,8 +78,10 @@ FrameResult parse_frame(const uint8_t *data, size_t size, MeterData &result) {
   if ((p = find({0x04, 0x6D}, 4))) decoded.meter_datetime.set(datetime(p));
   if ((p = find({0x34, 0xFD, 0x17}, 4))) {
     decoded.error_code.set(read_u32(p));
-    if (decoded.error_code.value == 0) decoded.error_start.set("No error");
-    else if ((p = find({0x34, 0x6D}, 4))) decoded.error_start.set(datetime(p));
+    if (decoded.error_code.value == 0)
+      decoded.error_start.set("No error");
+    else if ((p = find({0x34, 0x6D}, 4)))
+      decoded.error_start.set(datetime(p));
   }
   if ((p = find({0x04, 0x20}, 4))) decoded.battery_operating_duration.set(read_u32(p) / 3600.0f / 24.0f);
   if ((p = find({0x04, 0x24}, 4))) decoded.operating_time_without_error.set(read_u32(p) / 3600.0f / 24.0f);
@@ -108,8 +113,10 @@ bool FrameReceiver::push(uint8_t byte, MeterData &result, FrameResult &error) {
       this->clear();
       return true;
     }
-    if (status == FrameResult::INCOMPLETE) keep = std::min(keep, i);
-    else error = status;
+    if (status == FrameResult::INCOMPLETE)
+      keep = std::min(keep, i);
+    else
+      error = status;
   }
   if (keep != 0) {
     std::move(this->buffer_.begin() + keep, this->buffer_.begin() + this->size_, this->buffer_.begin());

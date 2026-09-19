@@ -1,10 +1,10 @@
 #pragma once
-#include "esphome/core/component.h"
-#include "esphome/components/uart/uart.h"
-#include "esphome/components/sensor/sensor.h"
-#include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/button/button.h"
+#include "esphome/components/sensor/sensor.h"
+#include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/components/uart/uart.h"
+#include "esphome/core/component.h"
 #include "parser.h"
 
 namespace esphome {
@@ -33,6 +33,7 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   void set_serial_number(text_sensor::TextSensor *entity) { this->serial_number_ = entity; }
   void set_manufacturer(text_sensor::TextSensor *entity) { this->manufacturer_ = entity; }
   void set_readout_successful(binary_sensor::BinarySensor *entity) { this->readout_successful_ = entity; }
+
  protected:
   void publish_(const MeterData &data);
   FrameReceiver receiver_;
@@ -63,6 +64,7 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
 class ReadNowButton : public button::Button {
  public:
   void set_parent(QalcosonicE3 *parent) { this->parent_ = parent; }
+
  protected:
   void press_action() override { this->parent_->update(); }
   QalcosonicE3 *parent_{nullptr};
