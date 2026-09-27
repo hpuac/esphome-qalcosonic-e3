@@ -40,8 +40,17 @@ assert validated["readout_failures"]["state_class"] == "total"
 assert validated["readout_failures"]["disabled_by_default"] is True
 assert validated["readout_successful"]["disabled_by_default"] is False
 assert validated["readout_successful"]["device_class"] == "connectivity"
+assert validated["unavailable_after_failures"] == 5
 config["qalcosonic_e3"] = {"uart_id": "mbus_uart"}
-validate(config)  # Every entity is optional.
+# Every entity is optional, and invalidation is disabled unless configured.
+assert validate(config)["qalcosonic_e3"][0]["unavailable_after_failures"] == 0
+for threshold in (0, 1, 5, 4294967295):
+    config["qalcosonic_e3"]["unavailable_after_failures"] = threshold
+    assert validate(config)["qalcosonic_e3"][0]["unavailable_after_failures"] == threshold
+for threshold in (-1, 1.5, 4294967296, "invalid"):
+    config["qalcosonic_e3"]["unavailable_after_failures"] = threshold
+    validate(config, False)
+del config["qalcosonic_e3"]["unavailable_after_failures"]
 config["uart"]["parity"] = "NONE"
 validate(config, False)
 config["uart"]["parity"] = "EVEN"

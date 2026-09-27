@@ -42,6 +42,7 @@ uart:
 qalcosonic_e3:
   uart_id: mbus_uart
   update_interval: 2min
+  unavailable_after_failures: 5
   energy:
     name: "Energy"
   volume:

@@ -33,15 +33,19 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   void set_serial_number(text_sensor::TextSensor *entity) { this->serial_number_ = entity; }
   void set_manufacturer(text_sensor::TextSensor *entity) { this->manufacturer_ = entity; }
   void set_readout_successful(binary_sensor::BinarySensor *entity) { this->readout_successful_ = entity; }
+  void set_unavailable_after_failures(uint32_t failures) { this->unavailable_after_failures_ = failures; }
 
  protected:
   void publish_(const MeterData &data);
+  void invalidate_measurements_();
   FrameReceiver receiver_;
   bool ready_{false};
   bool pending_{false};
   bool warned_{false};
   uint32_t requested_at_{0};
   uint32_t failures_{0};
+  uint32_t consecutive_failures_{0};
+  uint32_t unavailable_after_failures_{0};
   sensor::Sensor *energy_{nullptr};
   sensor::Sensor *volume_{nullptr};
   sensor::Sensor *power_{nullptr};

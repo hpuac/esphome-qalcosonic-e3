@@ -166,8 +166,21 @@ without timezone conversion. Missing records leave existing states unchanged.
 
 `readout_successful` reports whether the last read succeeded and stays unknown
 until the first result. A read times out after 2 seconds. `readout_failures`
-counts failed reads since boot and resets when the ESP restarts. Missing
-readings do not clear previously reported measurements.
+counts failed reads since boot and resets when the ESP restarts.
+
+`unavailable_after_failures` sets the number of consecutive failed reads before
+numeric meter sensors publish `NaN` (shown as **unknown** in Home Assistant).
+The default `0` keeps the last measurements.
+
+```yaml
+qalcosonic_e3:
+  uart_id: mbus_uart
+  update_interval: 2min
+  unavailable_after_failures: 5
+```
+
+A successful read resets the failure streak and updates received values.
+Text sensors retain their values; sensor filters can suppress or replace `NaN`.
 
 ## Contributing
 
