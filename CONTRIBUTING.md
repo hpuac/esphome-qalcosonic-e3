@@ -5,9 +5,10 @@ configuration schemas; C++ handles UART reception, parsing, and publishing.
 
 ## Local development
 
-Nix is **optional**. You can use your locally installed Python (3.14 is used
-by CI and the development shell), Git, and a C++17 compiler with sanitizer support
-(Clang or GCC) to develop and test this component.
+Nix is **optional**. You can use your locally installed Python, Git, and a
+C++17 compiler with sanitizer support (Clang or GCC) to develop and test this
+component. For Python, use the version configured in
+[CI](.github/workflows/tests.yml).
 
 ### Setup without Nix
 
@@ -20,7 +21,7 @@ python3 -m venv .venv
 
 ### Optional setup with Nix
 
-If you use Nix, the pinned development shell provides Python 3.14, uv, Clang,
+If you use Nix, the pinned development shell provides Python, uv, Clang,
 and Git on macOS and Linux:
 
 ```sh
@@ -29,9 +30,9 @@ uv venv --python python3 --seed .venv
 uv pip install --python .venv/bin/python -r requirements-dev.txt -r requirements-format.txt
 ```
 
-The shell uses stable nixpkgs 26.05. `flake.lock` pins the Nix toolchain;
-the requirements files pin ESPHome and
-pre-commit. When using this setup, run the commands below inside `nix develop`.
+The stable nixpkgs release and tools are configured in [flake.nix](flake.nix),
+with the exact revision pinned in `flake.lock`. When using this setup, run the
+commands below inside `nix develop`.
 To update the Nix toolchain intentionally, run
 `nix flake update nixpkgs` and commit the updated lockfile.
 
@@ -64,7 +65,8 @@ enabled by default):
 SANITIZERS=address,undefined ./tests/run.sh
 ```
 
-Validate and build against ESPHome (development verification uses 2026.9.0):
+Validate and build against the ESPHome version pinned in
+[requirements-dev.txt](requirements-dev.txt):
 
 ```sh
 .venv/bin/python tests/test_config.py
