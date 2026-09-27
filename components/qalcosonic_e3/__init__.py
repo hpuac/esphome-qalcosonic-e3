@@ -129,6 +129,7 @@ CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(QalcosonicE3),
+            cv.Optional("unavailable_after_failures", default=0): cv.uint32_t,
             **{cv.Optional(key): schema for key, schema in SENSORS.items()},
             **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},
             cv.Optional("readout_successful"): binary_sensor.binary_sensor_schema(
@@ -156,6 +157,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
+    cg.add(var.set_unavailable_after_failures(config["unavailable_after_failures"]))
     for key in SENSORS:
         if key in config:
             entity = await sensor.new_sensor(config[key])

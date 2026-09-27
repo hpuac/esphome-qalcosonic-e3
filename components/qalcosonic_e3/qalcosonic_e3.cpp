@@ -1,5 +1,6 @@
 #include "qalcosonic_e3.h"
 
+#include <initializer_list>
 #include <limits>
 
 #include "esphome/core/hal.h"
@@ -36,6 +37,9 @@ void QalcosonicE3::loop() {
   if (this->pending_ && millis() - this->requested_at_ >= 2000) {
     this->pending_ = false;
     if (this->failures_ != std::numeric_limits<uint32_t>::max()) ++this->failures_;
+    if (this->consecutive_failures_ != std::numeric_limits<uint32_t>::max()) ++this->consecutive_failures_;
+    if (this->unavailable_after_failures_ != 0 && this->consecutive_failures_ >= this->unavailable_after_failures_)
+      this->invalidate_measurements_();
     if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(this->failures_);
     if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(false);
     ESP_LOGW(TAG, "No valid response within 2 seconds (%u buffered bytes); readout failures since reboot=%lu",
@@ -50,6 +54,7 @@ void QalcosonicE3::loop() {
     MeterData data;
     FrameResult error;
     if (this->receiver_.push(byte, data, error)) {
+      this->consecutive_failures_ = 0;
       this->publish_(data);
       this->pending_ = false;
       if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(true);
@@ -58,6 +63,15 @@ void QalcosonicE3::loop() {
       ESP_LOGW(TAG, "%s", frame_result_message(error));
       this->warned_ = true;
     }
+  }
+}
+
+void QalcosonicE3::invalidate_measurements_() {
+  for (auto *entity :
+       {this->energy_, this->volume_, this->power_, this->flow_, this->flow_temperature_, this->return_temperature_,
+        this->temperature_difference_, this->error_code_, this->battery_operating_duration_,
+        this->operating_time_without_error_, this->protocol_version_}) {
+    if (entity != nullptr) entity->publish_state(std::numeric_limits<float>::quiet_NaN());
   }
 }
 
@@ -89,6 +103,8 @@ void QalcosonicE3::publish_(const MeterData &data) {
 void QalcosonicE3::dump_config() {
   ESP_LOGCONFIG(TAG, "QALCOSONIC E3 (optical M-Bus, address 0x01)");
   LOG_UPDATE_INTERVAL(this);
+  ESP_LOGCONFIG(TAG, "  Unavailable after consecutive failures: %lu (0 = disabled)",
+                static_cast<unsigned long>(this->unavailable_after_failures_));
   LOG_SENSOR("  ", "Energy", this->energy_);
   LOG_SENSOR("  ", "Volume", this->volume_);
   LOG_SENSOR("  ", "Power", this->power_);
