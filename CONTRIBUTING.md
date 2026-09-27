@@ -5,6 +5,43 @@ configuration schemas; C++ handles UART reception, parsing, and publishing.
 
 ## Local development
 
+Nix is **optional**. You can use your locally installed Python, Git, and a
+C++17 compiler with sanitizer support (Clang or GCC) to develop and test this
+component. For Python, use the version configured in
+[CI](.github/workflows/tests.yml).
+
+### Setup without Nix
+
+Create a virtual environment and install the test and formatting dependencies:
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt -r requirements-format.txt
+```
+
+### Optional setup with Nix
+
+If you use Nix, the pinned development shell provides Python, uv, Clang,
+and Git on macOS and Linux:
+
+```sh
+nix develop
+uv venv --python python3 --seed .venv
+uv pip install --python .venv/bin/python -r requirements-dev.txt -r requirements-format.txt
+```
+
+The stable nixpkgs release and tools are configured in [flake.nix](flake.nix),
+with the exact revision pinned in `flake.lock`. When using this setup, run the
+commands below inside `nix develop`.
+To update the Nix toolchain intentionally, run
+`nix flake update nixpkgs` and commit the updated lockfile.
+
+### Using the local component
+
+Both setups use the same `.venv/bin/` commands below. Install dependencies
+initially and again after requirements change. ESPHome downloads its ESP-IDF
+toolchain on the first firmware build.
+
 For a local checkout, replace the Git source in your device configuration with:
 
 ```yaml
@@ -28,11 +65,10 @@ enabled by default):
 SANITIZERS=address,undefined ./tests/run.sh
 ```
 
-Validate and build against ESPHome (development verification uses 2026.9.0):
+Validate and build against the ESPHome version pinned in
+[requirements-dev.txt](requirements-dev.txt):
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python tests/test_config.py
 .venv/bin/esphome config tests/esp32-c6.yaml
 .venv/bin/esphome compile tests/esp32-c6.yaml
@@ -46,11 +82,9 @@ for real device credentials.
 
 ## Formatting
 
-Install the formatting runner and format tracked files:
+After either setup above, format tracked files:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-format.txt
 .venv/bin/pre-commit run --all-files
 ```
 
