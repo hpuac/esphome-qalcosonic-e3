@@ -14,7 +14,7 @@
         in
         {
           default = pkgs.mkShell {
-            packages = with pkgs; [ python313 uv clang git ];
+            packages = with pkgs; [ python314 uv clang git ];
           };
         });
     };

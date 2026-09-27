@@ -5,8 +5,8 @@ configuration schemas; C++ handles UART reception, parsing, and publishing.
 
 ## Local development
 
-Nix is **optional**. You can use your locally installed Python (3.13 is used
-by the development shell), Git, and a C++17 compiler with sanitizer support
+Nix is **optional**. You can use your locally installed Python (3.14 is used
+by CI and the development shell), Git, and a C++17 compiler with sanitizer support
 (Clang or GCC) to develop and test this component.
 
 ### Setup without Nix
@@ -20,7 +20,7 @@ python3 -m venv .venv
 
 ### Optional setup with Nix
 
-If you use Nix, the pinned development shell provides Python 3.13, uv, Clang,
+If you use Nix, the pinned development shell provides Python 3.14, uv, Clang,
 and Git on macOS and Linux:
 
 ```sh
