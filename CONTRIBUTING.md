@@ -29,7 +29,8 @@ uv venv --python python3 --seed .venv
 uv pip install --python .venv/bin/python -r requirements-dev.txt -r requirements-format.txt
 ```
 
-`flake.lock` pins the Nix toolchain; the requirements files pin ESPHome and
+The shell uses stable nixpkgs 26.05. `flake.lock` pins the Nix toolchain;
+the requirements files pin ESPHome and
 pre-commit. When using this setup, run the commands below inside `nix develop`.
 To update the Nix toolchain intentionally, run
 `nix flake update nixpkgs` and commit the updated lockfile.

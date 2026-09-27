@@ -1,7 +1,7 @@
 {
   description = "Development tools for the ESPHome QALCOSONIC E3 component";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
   outputs = { nixpkgs, ... }:
     let
