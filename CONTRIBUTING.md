@@ -5,6 +5,41 @@ configuration schemas; C++ handles UART reception, parsing, and publishing.
 
 ## Local development
 
+Nix is **optional**. You can use your locally installed Python (3.13 is used
+by the development shell), Git, and a C++17 compiler with sanitizer support
+(Clang or GCC) to develop and test this component.
+
+### Setup without Nix
+
+Create a virtual environment and install the test and formatting dependencies:
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt -r requirements-format.txt
+```
+
+### Optional setup with Nix
+
+If you use Nix, the pinned development shell provides Python 3.13, uv, Clang,
+and Git on macOS and Linux:
+
+```sh
+nix develop
+uv venv --python python3 --seed .venv
+uv pip install --python .venv/bin/python -r requirements-dev.txt -r requirements-format.txt
+```
+
+`flake.lock` pins the Nix toolchain; the requirements files pin ESPHome and
+pre-commit. When using this setup, run the commands below inside `nix develop`.
+To update the Nix toolchain intentionally, run
+`nix flake update nixpkgs` and commit the updated lockfile.
+
+### Using the local component
+
+Both setups use the same `.venv/bin/` commands below. Install dependencies
+initially and again after requirements change. ESPHome downloads its ESP-IDF
+toolchain on the first firmware build.
+
 For a local checkout, replace the Git source in your device configuration with:
 
 ```yaml
@@ -31,8 +66,6 @@ SANITIZERS=address,undefined ./tests/run.sh
 Validate and build against ESPHome (development verification uses 2026.9.0):
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python tests/test_config.py
 .venv/bin/esphome config tests/esp32-c6.yaml
 .venv/bin/esphome compile tests/esp32-c6.yaml
@@ -46,11 +79,9 @@ for real device credentials.
 
 ## Formatting
 
-Install the formatting runner and format tracked files:
+After either setup above, format tracked files:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-format.txt
 .venv/bin/pre-commit run --all-files
 ```
 
