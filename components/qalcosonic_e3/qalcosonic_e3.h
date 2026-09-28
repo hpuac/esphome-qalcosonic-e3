@@ -42,8 +42,8 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   bool ready_{false};
   bool pending_{false};
   bool warned_{false};
+  bool measurements_invalidated_{false};
   uint32_t requested_at_{0};
-  uint32_t failures_{0};
   uint32_t consecutive_failures_{0};
   uint32_t unavailable_after_failures_{0};
   sensor::Sensor *energy_{nullptr};

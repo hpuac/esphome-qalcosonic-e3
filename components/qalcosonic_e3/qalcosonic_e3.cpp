@@ -36,14 +36,16 @@ void QalcosonicE3::loop() {
   // Unsigned subtraction remains correct across millis() wraparound.
   if (this->pending_ && millis() - this->requested_at_ >= 2000) {
     this->pending_ = false;
-    if (this->failures_ != std::numeric_limits<uint32_t>::max()) ++this->failures_;
     if (this->consecutive_failures_ != std::numeric_limits<uint32_t>::max()) ++this->consecutive_failures_;
-    if (this->unavailable_after_failures_ != 0 && this->consecutive_failures_ >= this->unavailable_after_failures_)
+    if (this->unavailable_after_failures_ != 0 && !this->measurements_invalidated_ &&
+        this->consecutive_failures_ >= this->unavailable_after_failures_) {
       this->invalidate_measurements_();
-    if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(this->failures_);
+      this->measurements_invalidated_ = true;
+    }
+    if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(this->consecutive_failures_);
     if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(false);
-    ESP_LOGW(TAG, "No valid response within 2 seconds (%u buffered bytes); readout failures since reboot=%lu",
-             static_cast<unsigned>(this->receiver_.size()), static_cast<unsigned long>(this->failures_));
+    ESP_LOGW(TAG, "No valid response within 2 seconds (%u buffered bytes); consecutive readout failures=%lu",
+             static_cast<unsigned>(this->receiver_.size()), static_cast<unsigned long>(this->consecutive_failures_));
     this->receiver_.clear();
   }
   // Bound work per loop even when the UART is continuously receiving noise.
@@ -55,6 +57,8 @@ void QalcosonicE3::loop() {
     FrameResult error;
     if (this->receiver_.push(byte, data, error)) {
       this->consecutive_failures_ = 0;
+      this->measurements_invalidated_ = false;
+      if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(0);
       this->publish_(data);
       this->pending_ = false;
       if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(true);
@@ -116,7 +120,7 @@ void QalcosonicE3::dump_config() {
   LOG_SENSOR("  ", "Battery Operating Duration", this->battery_operating_duration_);
   LOG_SENSOR("  ", "Operating Time Without Error", this->operating_time_without_error_);
   LOG_SENSOR("  ", "Protocol Version", this->protocol_version_);
-  LOG_SENSOR("  ", "Readout Failures", this->readout_failures_);
+  LOG_SENSOR("  ", "Consecutive Readout Failures", this->readout_failures_);
   LOG_TEXT_SENSOR("  ", "Meter Datetime", this->meter_datetime_);
   LOG_TEXT_SENSOR("  ", "Error Start", this->error_start_);
   LOG_TEXT_SENSOR("  ", "Serial Number", this->serial_number_);
