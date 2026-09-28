@@ -1,5 +1,6 @@
 #include "qalcosonic_e3.h"
 
+#include <algorithm>
 #include <initializer_list>
 #include <limits>
 
@@ -45,8 +46,10 @@ void QalcosonicE3::request_read_() {
   uint8_t byte;
   for (size_t i = 0; i < 512 && this->available(); ++i) this->read_byte(&byte);
   this->receiver_.clear();
+  this->uart_trace_size_ = 0;
+  this->uart_trace_truncated_ = false;
   this->pending_ = true;
-  this->warned_ = false;
+  this->frame_error_ = FrameResult::INCOMPLETE;
   this->send_link_request_();
 }
 
@@ -54,14 +57,36 @@ void QalcosonicE3::send_link_request_() {
   const bool initializing = this->link_.needs_reset();
   const auto request = this->link_.start();
   this->requested_at_ = millis();
-  ESP_LOGD(TAG, "Sending M-Bus %s to QALCOSONIC E3", initializing ? "SND_NKE" : "REQ_UD2");
+  ESP_LOGD(TAG, "Sending M-Bus %s (0x%02X) to QALCOSONIC E3", initializing ? "SND_NKE" : "REQ_UD2", request[1]);
   this->write_array(request.data(), request.size());
+}
+
+void QalcosonicE3::log_uart_trace_() {
+#if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE
+  ESP_LOGV(TAG, "UART RX: %u byte(s)%s", static_cast<unsigned>(this->uart_trace_size_),
+           this->uart_trace_truncated_ ? " (trace truncated)" : "");
+  static constexpr char HEX[] = "0123456789ABCDEF";
+  for (size_t offset = 0; offset < this->uart_trace_size_; offset += 32) {
+    char line[32 * 3];
+    size_t length = 0;
+    const size_t end = std::min(offset + 32, this->uart_trace_size_);
+    for (size_t i = offset; i < end; ++i) {
+      if (i != offset) line[length++] = ' ';
+      const uint8_t byte = this->uart_trace_[i];
+      line[length++] = HEX[byte >> 4];
+      line[length++] = HEX[byte & 0x0F];
+    }
+    line[length] = '\0';
+    ESP_LOGV(TAG, "UART RX [%u-%u]: %s", static_cast<unsigned>(offset), static_cast<unsigned>(end - 1), line);
+  }
+#endif
 }
 
 void QalcosonicE3::loop() {
   // Unsigned subtraction remains correct across millis() wraparound.
   if (this->pending_ && millis() - this->requested_at_ >= 2000) {
     this->pending_ = false;
+    this->log_uart_trace_();
     const bool awaiting_ack = this->link_.awaiting_ack();
     this->link_.timeout();
     if (this->consecutive_failures_ != std::numeric_limits<uint32_t>::max()) ++this->consecutive_failures_;
@@ -72,6 +97,7 @@ void QalcosonicE3::loop() {
     }
     if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(this->consecutive_failures_);
     if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(false);
+    if (this->frame_error_ != FrameResult::INCOMPLETE) ESP_LOGW(TAG, "%s", frame_result_message(this->frame_error_));
     ESP_LOGW(TAG, "%s within 2 seconds (%u buffered bytes); consecutive readout failures=%lu",
              awaiting_ack ? "No SND_NKE acknowledgement" : "No valid response",
              static_cast<unsigned>(this->receiver_.size()), static_cast<unsigned long>(this->consecutive_failures_));
@@ -82,6 +108,10 @@ void QalcosonicE3::loop() {
     uint8_t byte;
     if (!this->read_byte(&byte)) break;
     if (!this->pending_) continue;
+    if (this->uart_trace_size_ < this->uart_trace_.size())
+      this->uart_trace_[this->uart_trace_size_++] = byte;
+    else
+      this->uart_trace_truncated_ = true;
     if (this->link_.awaiting_ack()) {
       if (this->link_.accept_ack(byte)) {
         this->last_link_activity_at_ = millis();
@@ -92,18 +122,18 @@ void QalcosonicE3::loop() {
     MeterData data;
     FrameResult error;
     if (this->receiver_.push(byte, data, error)) {
+      this->pending_ = false;
+      this->log_uart_trace_();
       this->link_.accept_response();
       this->last_link_activity_at_ = millis();
       this->consecutive_failures_ = 0;
       this->measurements_invalidated_ = false;
       if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(0);
       this->publish_(data);
-      this->pending_ = false;
       if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(true);
       ESP_LOGD(TAG, "QALCOSONIC E3 frame processed successfully");
-    } else if (error != FrameResult::INCOMPLETE && !this->warned_) {
-      ESP_LOGW(TAG, "%s", frame_result_message(error));
-      this->warned_ = true;
+    } else if (error != FrameResult::INCOMPLETE && this->frame_error_ == FrameResult::INCOMPLETE) {
+      this->frame_error_ = error;
     }
   }
 }

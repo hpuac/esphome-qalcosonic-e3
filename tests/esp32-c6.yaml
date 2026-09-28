@@ -8,6 +8,10 @@ esp32:
     type: esp-idf
 
 logger:
+  level: VERBOSE
+  initial_level: DEBUG
+  logs:
+    qalcosonic_e3: VERBOSE
 
 api:
   encryption:

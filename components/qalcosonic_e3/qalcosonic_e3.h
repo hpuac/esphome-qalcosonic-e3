@@ -1,4 +1,8 @@
 #pragma once
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/button/button.h"
 #include "esphome/components/sensor/sensor.h"
@@ -44,11 +48,15 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   void invalidate_measurements_();
   void request_read_();
   void send_link_request_();
+  void log_uart_trace_();
   FrameReceiver receiver_;
   LinkState link_;
+  std::array<uint8_t, 512> uart_trace_{};
+  size_t uart_trace_size_{0};
+  bool uart_trace_truncated_{false};
   bool ready_{false};
   bool pending_{false};
-  bool warned_{false};
+  FrameResult frame_error_{FrameResult::INCOMPLETE};
   bool measurements_invalidated_{false};
   bool automatic_readout_enabled_{true};
   uint32_t requested_at_{0};
