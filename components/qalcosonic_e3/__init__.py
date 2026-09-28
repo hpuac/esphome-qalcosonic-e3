@@ -94,7 +94,7 @@ SENSORS = {
         sensor.sensor_schema(
             accuracy_decimals=0,
             icon="mdi:counter",
-            state_class="total",
+            state_class="measurement",
             entity_category="diagnostic",
         )
     ),

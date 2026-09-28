@@ -36,7 +36,7 @@ def validate(value, expected=True):
 validated = validate(config)["qalcosonic_e3"][0]
 assert validated["energy"]["state_class"] == "total_increasing"
 assert validated["volume"]["device_class"] == "water"
-assert validated["readout_failures"]["state_class"] == "total"
+assert validated["readout_failures"]["state_class"] == "measurement"
 assert validated["readout_failures"]["disabled_by_default"] is True
 assert validated["readout_successful"]["disabled_by_default"] is False
 assert validated["readout_successful"]["device_class"] == "connectivity"

@@ -166,10 +166,12 @@ without timezone conversion. Missing records leave existing states unchanged.
 
 `readout_successful` reports whether the last read succeeded and stays unknown
 until the first result. A read times out after 2 seconds. `readout_failures`
-counts failed reads since boot and resets when the ESP restarts.
+counts consecutive failed reads since the last successful read and resets to
+zero after a successful read or when the ESP restarts.
 
 `unavailable_after_failures` sets the number of consecutive failed reads before
 numeric meter sensors publish `NaN` (shown as **unknown** in Home Assistant).
+They publish `NaN` once per failure streak, when the threshold is reached.
 The default `0` keeps the last measurements.
 
 ```yaml
