@@ -135,7 +135,7 @@ consumption has not been measured, so no battery-life impact is quantified.
 The first reading starts about 10 seconds after startup. Use `update_interval`
 to change the polling interval. Configure `automatic_readout` to expose a switch
 that pauses scheduled reads when off. The switch starts on after a reboot by
-default; turning it back on requests a reading immediately. `read_now` still
+default; turning it back on restarts the polling interval. `read_now` still
 requests a reading while automatic readout is off. A read already in progress
 finishes when the switch is turned off.
 The component only reads meter data; it does not change meter settings.

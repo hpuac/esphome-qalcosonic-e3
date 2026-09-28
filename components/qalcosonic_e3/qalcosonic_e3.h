@@ -16,7 +16,7 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   void loop() override;
   void update() override;
   void read_now();
-  void set_automatic_readout_enabled(bool enabled) { this->automatic_readout_enabled_ = enabled; }
+  void set_automatic_readout_enabled(bool enabled);
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
   void set_energy(sensor::Sensor *entity) { this->energy_ = entity; }

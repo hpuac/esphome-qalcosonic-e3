@@ -11,6 +11,7 @@ namespace qalcosonic_e3 {
 static const char *const TAG = "qalcosonic_e3";
 
 void QalcosonicE3::setup() {
+  if (!this->automatic_readout_enabled_) this->stop_poller();
   if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(0);
   this->set_timeout("first_read", 10000, [this]() {
     this->ready_ = true;
@@ -20,6 +21,15 @@ void QalcosonicE3::setup() {
 
 void QalcosonicE3::update() {
   if (this->automatic_readout_enabled_) this->request_read_();
+}
+
+void QalcosonicE3::set_automatic_readout_enabled(bool enabled) {
+  if (this->automatic_readout_enabled_ == enabled) return;
+  this->automatic_readout_enabled_ = enabled;
+  if (enabled)
+    this->start_poller();
+  else
+    this->stop_poller();
 }
 
 void QalcosonicE3::read_now() { this->request_read_(); }
@@ -142,7 +152,6 @@ void AutomaticReadoutSwitch::setup() {
 void AutomaticReadoutSwitch::write_state(bool state) {
   this->parent_->set_automatic_readout_enabled(state);
   this->publish_state(state);
-  if (state) this->parent_->update();
 }
 
 void AutomaticReadoutSwitch::dump_config() { LOG_SWITCH("  ", "Automatic Readout", this); }
