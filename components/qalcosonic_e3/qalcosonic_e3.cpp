@@ -11,6 +11,7 @@ namespace qalcosonic_e3 {
 static const char *const TAG = "qalcosonic_e3";
 
 void QalcosonicE3::setup() {
+  // PollingComponent starts its timer before setup(), even if the switch started off.
   if (!this->automatic_readout_enabled_) this->stop_poller();
   if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(0);
   this->set_timeout("first_read", 10000, [this]() {
@@ -146,7 +147,7 @@ void QalcosonicE3::dump_config() {
 
 void AutomaticReadoutSwitch::setup() {
   auto initial_state = this->get_initial_state_with_restore_mode();
-  this->write_state(initial_state.value_or(true));
+  if (initial_state.has_value()) this->write_state(*initial_state);
 }
 
 void AutomaticReadoutSwitch::write_state(bool state) {
