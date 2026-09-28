@@ -2,6 +2,7 @@
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/button/button.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/core/component.h"
@@ -14,6 +15,8 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   void setup() override;
   void loop() override;
   void update() override;
+  void read_now();
+  void set_automatic_readout_enabled(bool enabled);
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
   void set_energy(sensor::Sensor *entity) { this->energy_ = entity; }
@@ -38,11 +41,13 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
  protected:
   void publish_(const MeterData &data);
   void invalidate_measurements_();
+  void request_read_();
   FrameReceiver receiver_;
   bool ready_{false};
   bool pending_{false};
   bool warned_{false};
   bool measurements_invalidated_{false};
+  bool automatic_readout_enabled_{true};
   uint32_t requested_at_{0};
   uint32_t consecutive_failures_{0};
   uint32_t unavailable_after_failures_{0};
@@ -70,7 +75,18 @@ class ReadNowButton : public button::Button {
   void set_parent(QalcosonicE3 *parent) { this->parent_ = parent; }
 
  protected:
-  void press_action() override { this->parent_->update(); }
+  void press_action() override { this->parent_->read_now(); }
+  QalcosonicE3 *parent_{nullptr};
+};
+
+class AutomaticReadoutSwitch : public switch_::Switch, public Component {
+ public:
+  void set_parent(QalcosonicE3 *parent) { this->parent_ = parent; }
+  void setup() override;
+  void dump_config() override;
+
+ protected:
+  void write_state(bool state) override;
   QalcosonicE3 *parent_{nullptr};
 };
 }  // namespace qalcosonic_e3

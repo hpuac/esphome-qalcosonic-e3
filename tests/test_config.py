@@ -41,6 +41,8 @@ assert validated["readout_failures"]["state_class"] == "measurement"
 assert validated["readout_failures"]["disabled_by_default"] is True
 assert validated["readout_successful"]["disabled_by_default"] is False
 assert validated["readout_successful"]["device_class"] == "connectivity"
+assert validated["automatic_readout"]["restore_mode"] == "ALWAYS_ON"
+assert validated["automatic_readout"]["entity_category"] == "config"
 assert validated["unavailable_after_failures"] == 5
 config["qalcosonic_e3"] = {"uart_id": "mbus_uart"}
 # Every entity is optional, and invalidation is disabled unless configured.
