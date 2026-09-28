@@ -43,16 +43,23 @@ void QalcosonicE3::request_read_() {
   this->receiver_.clear();
   this->pending_ = true;
   this->warned_ = false;
+  this->send_link_request_();
+}
+
+void QalcosonicE3::send_link_request_() {
+  const bool initializing = this->link_.needs_reset();
+  const auto request = this->link_.start();
   this->requested_at_ = millis();
-  static const uint8_t REQUEST[] = {0x10, 0x5B, 0x01, 0x5C, 0x16};
-  ESP_LOGD(TAG, "Requesting QALCOSONIC E3 data");
-  this->write_array(REQUEST, sizeof(REQUEST));
+  ESP_LOGD(TAG, "%s QALCOSONIC E3", initializing ? "Initializing" : "Requesting data from");
+  this->write_array(request.data(), request.size());
 }
 
 void QalcosonicE3::loop() {
   // Unsigned subtraction remains correct across millis() wraparound.
   if (this->pending_ && millis() - this->requested_at_ >= 2000) {
     this->pending_ = false;
+    const bool awaiting_ack = this->link_.awaiting_ack();
+    this->link_.timeout();
     if (this->consecutive_failures_ != std::numeric_limits<uint32_t>::max()) ++this->consecutive_failures_;
     if (this->unavailable_after_failures_ != 0 && !this->measurements_invalidated_ &&
         this->consecutive_failures_ >= this->unavailable_after_failures_) {
@@ -61,7 +68,8 @@ void QalcosonicE3::loop() {
     }
     if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(this->consecutive_failures_);
     if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(false);
-    ESP_LOGW(TAG, "No valid response within 2 seconds (%u buffered bytes); consecutive readout failures=%lu",
+    ESP_LOGW(TAG, "%s within 2 seconds (%u buffered bytes); consecutive readout failures=%lu",
+             awaiting_ack ? "No SND_NKE acknowledgement" : "No valid response",
              static_cast<unsigned>(this->receiver_.size()), static_cast<unsigned long>(this->consecutive_failures_));
     this->receiver_.clear();
   }
@@ -70,9 +78,14 @@ void QalcosonicE3::loop() {
     uint8_t byte;
     if (!this->read_byte(&byte)) break;
     if (!this->pending_) continue;
+    if (this->link_.awaiting_ack()) {
+      if (this->link_.accept_ack(byte)) this->send_link_request_();
+      continue;
+    }
     MeterData data;
     FrameResult error;
     if (this->receiver_.push(byte, data, error)) {
+      this->link_.accept_response();
       this->consecutive_failures_ = 0;
       this->measurements_invalidated_ = false;
       if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(0);
