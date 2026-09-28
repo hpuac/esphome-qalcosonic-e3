@@ -9,6 +9,7 @@
 namespace esphome {
 namespace qalcosonic_e3 {
 static const char *const TAG = "qalcosonic_e3";
+static constexpr uint32_t LINK_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 void QalcosonicE3::setup() {
   // PollingComponent starts its timer before setup(), even if the switch started off.
@@ -37,6 +38,9 @@ void QalcosonicE3::read_now() { this->request_read_(); }
 
 void QalcosonicE3::request_read_() {
   if (!this->ready_ || this->pending_) return;
+  // The optical interface goes inactive after five minutes without communication.
+  if (!this->link_.needs_reset() && millis() - this->last_link_activity_at_ >= LINK_IDLE_TIMEOUT_MS)
+    this->link_.reset();
   // Discard bytes left over from a previous request before starting a new one.
   uint8_t byte;
   for (size_t i = 0; i < 512 && this->available(); ++i) this->read_byte(&byte);
@@ -50,7 +54,7 @@ void QalcosonicE3::send_link_request_() {
   const bool initializing = this->link_.needs_reset();
   const auto request = this->link_.start();
   this->requested_at_ = millis();
-  ESP_LOGD(TAG, "%s QALCOSONIC E3", initializing ? "Initializing" : "Requesting data from");
+  ESP_LOGD(TAG, "Sending M-Bus %s to QALCOSONIC E3", initializing ? "SND_NKE" : "REQ_UD2");
   this->write_array(request.data(), request.size());
 }
 
@@ -79,13 +83,17 @@ void QalcosonicE3::loop() {
     if (!this->read_byte(&byte)) break;
     if (!this->pending_) continue;
     if (this->link_.awaiting_ack()) {
-      if (this->link_.accept_ack(byte)) this->send_link_request_();
+      if (this->link_.accept_ack(byte)) {
+        this->last_link_activity_at_ = millis();
+        this->send_link_request_();
+      }
       continue;
     }
     MeterData data;
     FrameResult error;
     if (this->receiver_.push(byte, data, error)) {
       this->link_.accept_response();
+      this->last_link_activity_at_ = millis();
       this->consecutive_failures_ = 0;
       this->measurements_invalidated_ = false;
       if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(0);

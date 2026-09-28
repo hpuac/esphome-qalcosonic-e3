@@ -33,12 +33,19 @@ int main() {
 
   link.accept_response();
   assert(link.start() == second);
+
   link.timeout();
   assert(link.start() == second);
   link.accept_response();
   assert(link.start() == first);
   link.accept_response();
   assert(link.start() == second);
+
+  // A new optical session starts with SND_NKE and FCB=1.
+  link.reset();
+  assert(link.start() == reset);
+  assert(link.accept_ack(0xE5));
+  assert(link.start() == first);
 
   std::cout << "M-Bus link state tests passed\n";
 }

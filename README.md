@@ -139,10 +139,6 @@ The switch starts on after a reboot by default. Turning it back on restarts
 the polling interval. `read_now` still requests a reading while automatic
 readout is off. A read already in progress finishes when the switch is turned off.
 The component only reads meter data; it does not change meter settings.
-Before the first read, the component initializes the M-Bus link with `SND_NKE`
-and waits for its `E5` acknowledgement. It then alternates the `REQ_UD2`
-frame-count bit after each valid response. A failed read retries the same bit;
-after three failed requests the next read reinitializes the link.
 
 ## Entities
 

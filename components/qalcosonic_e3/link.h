@@ -11,6 +11,11 @@ class LinkState {
  public:
   bool needs_reset() const { return this->phase_ == Phase::NEED_RESET; }
   bool awaiting_ack() const { return this->phase_ == Phase::AWAITING_ACK; }
+  void reset() {
+    this->phase_ = Phase::NEED_RESET;
+    this->next_fcb_ = true;
+    this->failed_requests_ = 0;
+  }
 
   std::array<uint8_t, 5> start() {
     if (this->needs_reset()) {
@@ -39,10 +44,13 @@ class LinkState {
 
   void timeout() {
     if (this->awaiting_ack()) {
-      this->phase_ = Phase::NEED_RESET;
+      this->reset();
     } else if (this->phase_ == Phase::AWAITING_DATA) {
       // Retry the same FCB twice; then resynchronize on the next readout.
-      this->phase_ = ++this->failed_requests_ >= 3 ? Phase::NEED_RESET : Phase::READY;
+      if (++this->failed_requests_ >= 3)
+        this->reset();
+      else
+        this->phase_ = Phase::READY;
     }
   }
 
