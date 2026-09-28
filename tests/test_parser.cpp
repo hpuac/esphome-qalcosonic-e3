@@ -1,6 +1,9 @@
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <vector>
 
@@ -38,8 +41,32 @@ int main(int argc, char **argv) {
   near(data.temperature_difference, 18.70f);
   near(data.battery_operating_duration, 13424185 / 3600.0f / 24.0f);
   near(data.operating_time_without_error, 13424185 / 3600.0f / 24.0f);
-  for (size_t n = 0; n < frame.size(); ++n) assert(parse_frame(frame.data(), n, data) == FrameResult::INCOMPLETE);
+  auto find_pattern = [](std::vector<uint8_t> &bytes, std::initializer_list<uint8_t> pattern) {
+    return std::search(bytes.begin(), bytes.end(), pattern.begin(), pattern.end());
+  };
+  // A record marker inside an earlier record's value is not a new record.
   auto bad = frame;
+  auto battery = find_pattern(bad, {0x04, 0x20});
+  assert(battery != bad.end());
+  const std::array<uint8_t, 4> embedded_marker{{0x04, 0x13, 0xFF, 0xFF}};
+  std::copy(embedded_marker.begin(), embedded_marker.end(), battery + 2);
+  checksum(bad);
+  assert(parse_frame(bad.data(), bad.size(), data) == FrameResult::OK);
+  near(data.volume, 3.032f);
+  // Signed M-Bus integers can represent reverse flow and sub-zero temperatures.
+  bad = frame;
+  auto flow = find_pattern(bad, {0x04, 0x3B});
+  auto temperature = find_pattern(bad, {0x02, 0x59});
+  assert(flow != bad.end() && temperature != bad.end());
+  std::fill(flow + 2, flow + 6, 0xFF);
+  temperature[2] = 0x9C;
+  temperature[3] = 0xFF;
+  checksum(bad);
+  assert(parse_frame(bad.data(), bad.size(), data) == FrameResult::OK);
+  near(data.flow, -0.001f);
+  near(data.flow_temperature, -1.0f);
+  for (size_t n = 0; n < frame.size(); ++n) assert(parse_frame(frame.data(), n, data) == FrameResult::INCOMPLETE);
+  bad = frame;
   bad[50] ^= 1;
   assert(parse_frame(bad.data(), bad.size(), data) == FrameResult::CHECKSUM);
   bad = frame;

@@ -83,26 +83,6 @@ void QalcosonicE3::log_uart_trace_() {
 }
 
 void QalcosonicE3::loop() {
-  // Unsigned subtraction remains correct across millis() wraparound.
-  if (this->pending_ && millis() - this->requested_at_ >= 2000) {
-    this->pending_ = false;
-    this->log_uart_trace_();
-    const bool awaiting_ack = this->link_.awaiting_ack();
-    this->link_.timeout();
-    if (this->consecutive_failures_ != std::numeric_limits<uint32_t>::max()) ++this->consecutive_failures_;
-    if (this->unavailable_after_failures_ != 0 && !this->measurements_invalidated_ &&
-        this->consecutive_failures_ >= this->unavailable_after_failures_) {
-      this->invalidate_measurements_();
-      this->measurements_invalidated_ = true;
-    }
-    if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(this->consecutive_failures_);
-    if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(false);
-    if (this->frame_error_ != FrameResult::INCOMPLETE) ESP_LOGW(TAG, "%s", frame_result_message(this->frame_error_));
-    ESP_LOGW(TAG, "%s within 2 seconds (%u buffered bytes); consecutive readout failures=%lu",
-             awaiting_ack ? "No SND_NKE acknowledgement" : "No valid response",
-             static_cast<unsigned>(this->receiver_.size()), static_cast<unsigned long>(this->consecutive_failures_));
-    this->receiver_.clear();
-  }
   // Bound work per loop even when the UART is continuously receiving noise.
   for (size_t i = 0; i < 512 && this->available(); ++i) {
     uint8_t byte;
@@ -135,6 +115,27 @@ void QalcosonicE3::loop() {
     } else if (error != FrameResult::INCOMPLETE && this->frame_error_ == FrameResult::INCOMPLETE) {
       this->frame_error_ = error;
     }
+  }
+  // Process already-buffered UART data before declaring a request timed out.
+  // Unsigned subtraction remains correct across millis() wraparound.
+  if (this->pending_ && millis() - this->requested_at_ >= 2000) {
+    this->pending_ = false;
+    this->log_uart_trace_();
+    const bool awaiting_ack = this->link_.awaiting_ack();
+    this->link_.timeout();
+    if (this->consecutive_failures_ != std::numeric_limits<uint32_t>::max()) ++this->consecutive_failures_;
+    if (this->unavailable_after_failures_ != 0 && !this->measurements_invalidated_ &&
+        this->consecutive_failures_ >= this->unavailable_after_failures_) {
+      this->invalidate_measurements_();
+      this->measurements_invalidated_ = true;
+    }
+    if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(this->consecutive_failures_);
+    if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(false);
+    if (this->frame_error_ != FrameResult::INCOMPLETE) ESP_LOGW(TAG, "%s", frame_result_message(this->frame_error_));
+    ESP_LOGW(TAG, "%s within 2 seconds (%u buffered bytes); consecutive readout failures=%lu",
+             awaiting_ack ? "No SND_NKE acknowledgement" : "No valid response",
+             static_cast<unsigned>(this->receiver_.size()), static_cast<unsigned long>(this->consecutive_failures_));
+    this->receiver_.clear();
   }
 }
 
