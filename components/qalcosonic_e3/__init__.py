@@ -3,7 +3,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import binary_sensor, button, sensor, text_sensor, uart
-from esphome.const import CONF_ID, CONF_DISABLED_BY_DEFAULT
+from esphome.const import CONF_DISABLED_BY_DEFAULT, CONF_ID
 
 DEPENDENCIES = ["uart"]
 AUTO_LOAD = ["sensor", "text_sensor", "binary_sensor", "button"]

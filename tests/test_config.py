@@ -1,9 +1,10 @@
 """Exercise nested entity defaults and UART validation using real ESPHome."""
 
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
+
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
