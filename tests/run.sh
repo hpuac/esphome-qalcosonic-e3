@@ -8,3 +8,7 @@ trap 'rm -rf "$build_dir"' EXIT
   -Icomponents/qalcosonic_e3 components/qalcosonic_e3/parser.cpp \
   tests/test_parser.cpp -o "$build_dir/test_parser"
 "$build_dir/test_parser" tests/captured_frame.hex
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -pedantic \
+  -fsanitize="${SANITIZERS:-undefined}" -fno-omit-frame-pointer \
+  -Icomponents/qalcosonic_e3 tests/test_link.cpp -o "$build_dir/test_link"
+"$build_dir/test_link"

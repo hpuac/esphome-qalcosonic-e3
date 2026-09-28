@@ -6,6 +6,7 @@
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/core/component.h"
+#include "link.h"
 #include "parser.h"
 
 namespace esphome {
@@ -42,13 +43,16 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   void publish_(const MeterData &data);
   void invalidate_measurements_();
   void request_read_();
+  void send_link_request_();
   FrameReceiver receiver_;
+  LinkState link_;
   bool ready_{false};
   bool pending_{false};
   bool warned_{false};
   bool measurements_invalidated_{false};
   bool automatic_readout_enabled_{true};
   uint32_t requested_at_{0};
+  uint32_t last_link_activity_at_{0};
   uint32_t consecutive_failures_{0};
   uint32_t unavailable_after_failures_{0};
   sensor::Sensor *energy_{nullptr};
