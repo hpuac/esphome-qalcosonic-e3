@@ -2,15 +2,16 @@
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import binary_sensor, button, sensor, text_sensor, uart
+from esphome.components import binary_sensor, button, sensor, switch, text_sensor, uart
 from esphome.const import CONF_DISABLED_BY_DEFAULT, CONF_ID
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["sensor", "text_sensor", "binary_sensor", "button"]
+AUTO_LOAD = ["sensor", "text_sensor", "binary_sensor", "button", "switch"]
 MULTI_CONF = True
 ns = cg.esphome_ns.namespace("qalcosonic_e3")
 QalcosonicE3 = ns.class_("QalcosonicE3", cg.PollingComponent, uart.UARTDevice)
 ReadNowButton = ns.class_("ReadNowButton", button.Button)
+AutomaticReadoutSwitch = ns.class_("AutomaticReadoutSwitch", switch.Switch, cg.Component)
 
 
 def diagnostic(schema):
@@ -136,6 +137,13 @@ CONFIG_SCHEMA = (
                 device_class="connectivity", entity_category="diagnostic"
             ),
             cv.Optional("read_now"): button.button_schema(ReadNowButton, entity_category="config", icon="mdi:refresh"),
+            cv.Optional("automatic_readout"): switch.switch_schema(
+                AutomaticReadoutSwitch,
+                block_inverted=True,
+                default_restore_mode="ALWAYS_ON",
+                entity_category="config",
+                icon="mdi:autorenew",
+            ).extend(cv.COMPONENT_SCHEMA),
         }
     )
     .extend(cv.polling_component_schema("2min"))
@@ -171,4 +179,8 @@ async def to_code(config):
         cg.add(var.set_readout_successful(entity))
     if "read_now" in config:
         entity = await button.new_button(config["read_now"])
+        cg.add(entity.set_parent(var))
+    if "automatic_readout" in config:
+        entity = await switch.new_switch(config["automatic_readout"])
+        await cg.register_component(entity, config["automatic_readout"])
         cg.add(entity.set_parent(var))

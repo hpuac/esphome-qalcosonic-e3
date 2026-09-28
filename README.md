@@ -83,6 +83,8 @@ qalcosonic_e3:
     name: "Temperature Difference"
   readout_successful:
     name: "Readout Successful"
+  automatic_readout:
+    name: "Automatic Readout"
   read_now:
     name: "Read Now"
 ```
@@ -131,7 +133,11 @@ interval below the inactivity timeout for continuous availability. Battery-curre
 consumption has not been measured, so no battery-life impact is quantified.
 
 The first reading starts about 10 seconds after startup. Use `update_interval`
-to change the polling interval or `read_now` to request a reading manually.
+to change the polling interval. Configure `automatic_readout` to expose a switch
+that pauses scheduled reads when off. The switch starts on after a reboot by
+default; turning it back on requests a reading immediately. `read_now` still
+requests a reading while automatic readout is off. A read already in progress
+finishes when the switch is turned off.
 The component only reads meter data; it does not change meter settings.
 
 ## Entities
@@ -155,6 +161,7 @@ The component only reads meter data; it does not change meter settings.
 | `manufacturer`                 | Text sensor   | —    | Disabled | Diagnostic |
 | `readout_successful`           | Binary sensor | —    | Enabled  | Diagnostic |
 | `readout_failures`             | Sensor        | —    | Disabled | Diagnostic |
+| `automatic_readout`            | Switch        | —    | Enabled  | Config     |
 | `read_now`                     | Button        | —    | Enabled  | Config     |
 
 Battery operating duration is **elapsed operating time**, not percentage or

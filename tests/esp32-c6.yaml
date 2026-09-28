@@ -75,5 +75,7 @@ qalcosonic_e3:
     name: "Manufacturer"
   readout_successful:
     name: "Readout Successful"
+  automatic_readout:
+    name: "Automatic Readout"
   read_now:
     name: "Read Now"

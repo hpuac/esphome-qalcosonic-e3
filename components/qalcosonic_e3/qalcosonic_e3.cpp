@@ -19,6 +19,12 @@ void QalcosonicE3::setup() {
 }
 
 void QalcosonicE3::update() {
+  if (this->automatic_readout_enabled_) this->request_read_();
+}
+
+void QalcosonicE3::read_now() { this->request_read_(); }
+
+void QalcosonicE3::request_read_() {
   if (!this->ready_ || this->pending_) return;
   // Discard bytes left over from a previous request before starting a new one.
   uint8_t byte;
@@ -127,5 +133,18 @@ void QalcosonicE3::dump_config() {
   LOG_TEXT_SENSOR("  ", "Manufacturer", this->manufacturer_);
   LOG_BINARY_SENSOR("  ", "Readout Successful", this->readout_successful_);
 }
+
+void AutomaticReadoutSwitch::setup() {
+  auto initial_state = this->get_initial_state_with_restore_mode();
+  this->write_state(initial_state.value_or(true));
+}
+
+void AutomaticReadoutSwitch::write_state(bool state) {
+  this->parent_->set_automatic_readout_enabled(state);
+  this->publish_state(state);
+  if (state) this->parent_->update();
+}
+
+void AutomaticReadoutSwitch::dump_config() { LOG_SWITCH("  ", "Automatic Readout", this); }
 }  // namespace qalcosonic_e3
 }  // namespace esphome
