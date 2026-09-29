@@ -8,9 +8,44 @@ namespace esphome {
 namespace qalcosonic_e3 {
 namespace {
 uint16_t read_u16(const uint8_t *p) { return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8); }
+int16_t read_i16(const uint8_t *p) {
+  const uint16_t value = read_u16(p);
+  return static_cast<int16_t>(value <= INT16_MAX ? value : static_cast<int32_t>(value) - 0x10000);
+}
 uint32_t read_u32(const uint8_t *p) {
   return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2]) << 16) |
          (static_cast<uint32_t>(p[3]) << 24);
+}
+int32_t read_i32(const uint8_t *p) {
+  const uint32_t value = read_u32(p);
+  return static_cast<int32_t>(value <= INT32_MAX ? value : static_cast<int64_t>(value) - 0x100000000LL);
+}
+size_t record_data_size(uint8_t dif) {
+  switch (dif & 0x0F) {
+    case 0x00:
+    case 0x08:
+      return 0;
+    case 0x01:
+    case 0x09:
+      return 1;
+    case 0x02:
+    case 0x0A:
+      return 2;
+    case 0x03:
+    case 0x0B:
+      return 3;
+    case 0x04:
+    case 0x05:
+    case 0x0C:
+      return 4;
+    case 0x06:
+    case 0x0E:
+      return 6;
+    case 0x07:
+      return 8;
+    default:
+      return 0;
+  }
 }
 std::string datetime(const uint8_t *p) {
   const unsigned year = 2000U + ((p[2] >> 5) & 7U) + ((p[3] >> 4) & 15U) * 8U;
@@ -64,13 +99,42 @@ FrameResult parse_frame(const uint8_t *data, size_t size, MeterData &result) {
   decoded.manufacturer = manufacturer;
   decoded.protocol_version = data[13];
   const size_t end = total - 2;
-  // Preserve the reference lambda's first byte-pattern match, including its
-  // behavior when a pattern occurs inside another record's value.
   auto find = [&](std::initializer_list<uint8_t> pattern, size_t width) -> const uint8_t * {
-    for (size_t p = 19; p + pattern.size() <= end; ++p) {
-      if (std::equal(pattern.begin(), pattern.end(), data + p)) {
-        return p + pattern.size() + width <= end ? data + p + pattern.size() : nullptr;
+    for (size_t p = 19; p < end;) {
+      const size_t start = p;
+      const uint8_t dif = data[p++];
+      if (dif == 0x2F) continue;        // Idle filler.
+      if ((dif & 0x0F) == 0x0F) break;  // Manufacturer-specific data.
+      while (dif & 0x80) {
+        if (p >= end) return nullptr;
+        const uint8_t dife = data[p++];
+        if (!(dife & 0x80)) break;
       }
+      if (p >= end) return nullptr;
+      uint8_t vif = data[p++];
+      while (vif & 0x80) {
+        if (p >= end) return nullptr;
+        vif = data[p++];
+      }
+      size_t data_size = record_data_size(dif);
+      if ((dif & 0x0F) == 0x0D) {
+        if (p >= end) return nullptr;
+        const uint8_t lvar = data[p++];
+        if (lvar <= 0xBF)
+          data_size = lvar;
+        else if (lvar >= 0xC0 && lvar <= 0xC9)
+          data_size = lvar - 0xC0;
+        else if (lvar >= 0xD0 && lvar <= 0xD9)
+          data_size = lvar - 0xD0;
+        else if (lvar >= 0xE0 && lvar <= 0xEF)
+          data_size = lvar - 0xE0;
+        else
+          return nullptr;
+      }
+      if (data_size > end - p) return nullptr;
+      if (p - start == pattern.size() && std::equal(pattern.begin(), pattern.end(), data + start))
+        return width <= data_size ? data + p : nullptr;
+      p += data_size;
     }
     return nullptr;
   };
@@ -87,11 +151,11 @@ FrameResult parse_frame(const uint8_t *data, size_t size, MeterData &result) {
   if ((p = find({0x04, 0x24}, 4))) decoded.operating_time_without_error.set(read_u32(p) / 3600.0f / 24.0f);
   if ((p = find({0x04, 0x86, 0x3B}, 4))) decoded.energy.set(read_u32(p) / 1000.0f);
   if ((p = find({0x04, 0x13}, 4))) decoded.volume.set(read_u32(p) / 1000.0f);
-  if ((p = find({0x04, 0x2B}, 4))) decoded.power.set(read_u32(p) / 1000.0f);
-  if ((p = find({0x04, 0x3B}, 4))) decoded.flow.set(read_u32(p) / 1000.0f);
-  if ((p = find({0x02, 0x59}, 2))) decoded.flow_temperature.set(read_u16(p) / 100.0f);
-  if ((p = find({0x02, 0x5D}, 2))) decoded.return_temperature.set(read_u16(p) / 100.0f);
-  if ((p = find({0x02, 0x61}, 2))) decoded.temperature_difference.set(read_u16(p) / 100.0f);
+  if ((p = find({0x04, 0x2B}, 4))) decoded.power.set(read_i32(p) / 1000.0f);
+  if ((p = find({0x04, 0x3B}, 4))) decoded.flow.set(read_i32(p) / 1000.0f);
+  if ((p = find({0x02, 0x59}, 2))) decoded.flow_temperature.set(read_i16(p) / 100.0f);
+  if ((p = find({0x02, 0x5D}, 2))) decoded.return_temperature.set(read_i16(p) / 100.0f);
+  if ((p = find({0x02, 0x61}, 2))) decoded.temperature_difference.set(read_i16(p) / 100.0f);
   result = decoded;
   return FrameResult::OK;
 }
