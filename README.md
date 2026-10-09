@@ -3,8 +3,13 @@
 ESPHome external component for reading Axioma QALCOSONIC E3 heat meters via M-Bus over UART.
 
 Read energy, volume, power, flow, and temperatures directly into Home Assistant,
-with meter diagnostics and a manual read button. The component uses the optical
-M-Bus interface through a TTL optical read/write head.
+with meter diagnostics and a manual read button. The component supports optical
+M-Bus through a TTL optical read/write head and wired M-Bus through a proper
+M-Bus master/transceiver. Both use the same protocol and parser.
+
+**Wired M-Bus is recommended when you have access to the wired M-Bus connection.**
+It avoids optical alignment/head-placement problems and the optical inactivity
+timeout, making it better suited to permanent unattended installations.
 
 ## Hardware
 
@@ -66,6 +71,7 @@ uart:
 
 qalcosonic_e3:
   uart_id: mbus_uart
+  address: 0x01
   update_interval: 2min
   energy:
     name: "Energy"
@@ -102,6 +108,7 @@ below apply when an entity is configured. Diagnostic entities are disabled in Ho
 ```yaml
 qalcosonic_e3:
   uart_id: mbus_uart
+  address: 0x01
   error_code:
     name: "Error Code"
     disabled_by_default: false
@@ -110,7 +117,49 @@ qalcosonic_e3:
 The component requires both UART pins and validates 2400 baud, 8 data bits,
 even parity, and 1 stop bit. Use a dedicated UART with a 512-byte RX buffer.
 
-## Wiring
+## M-Bus primary address
+
+`address` accepts an unsigned 8-bit value (0–255), including hexadecimal notation.
+It defaults to `0x01` for backwards compatibility; that default is not guaranteed
+for wired M-Bus. Determine and configure the address for your own meter/interface.
+The same physical meter can have separate optical and wired primary addresses.
+
+Optical example (`0x01` was the tested meter's optical address):
+
+```yaml
+qalcosonic_e3:
+  uart_id: mbus_uart
+  address: 0x01
+  update_interval: 2min
+```
+
+Wired example (`0x2C`, decimal 44, was the same meter's wired address):
+
+```yaml
+qalcosonic_e3:
+  uart_id: mbus_uart
+  address: 0x2C
+  update_interval: 2min
+```
+
+Discovery/testing with **exactly one connected M-Bus slave**:
+
+```yaml
+qalcosonic_e3:
+  uart_id: mbus_uart
+  address: 0xFE
+```
+
+`0xFE` lets you test communication and observe the actual primary address in the
+logs. The response need not contain `0xFE`. It is not appropriate for normal
+multi-slave bus operation; this component does not implement a bus scanner.
+On the tested wired interface, `10 40 FE 3E 16` (SND_NKE) received `E5`, and
+`10 5B FE 59 16` (REQ_UD2) received a valid frame with response address `0x2C`.
+Requests are generated from the configured address, with checksum
+`(control + address) & 0xFF`. REQ_UD2 retains the existing alternating frame count
+bit (`0x7B` / `0x5B`) and retry behavior.
+
+## Optical wiring
 
 | ESP32      | TTL optical head |
 | ---------- | ---------------- |
@@ -124,13 +173,81 @@ TTL head. The wired M-Bus interface uses the same high-level
 telegram format but needs a proper M-Bus master/transceiver; never connect the
 meter's M-Bus wires directly to ESP GPIO.
 
+## Wired M-Bus hardware
+
+The tested **Zihatec M-BUS Master Module** worked with an ESP32-C6 and a single
+QALCOSONIC E3. See the [product/project page](https://www.hwhardsoft.de/2024/10/08/m-bus-master-breakout/).
+The exact small module tested has three connector groups:
+
+| Group                     | Connector labels                        |
+| ------------------------- | --------------------------------------- |
+| Power / M-Bus-side supply | `MGND`, `5-24V`                         |
+| M-Bus                     | `MBUS+`, `MBUS-`                        |
+| Digital side              | `3.3-5VDC`, `MBUS RX`, `MBUS TX`, `GND` |
+
+Tested digital wiring:
+
+| ESP32        | Zihatec module |
+| ------------ | -------------- |
+| 3.3 V        | `3.3-5VDC`     |
+| GND          | Digital `GND`  |
+| RX (GPIO2) ← | `MBUS RX`      |
+| TX (GPIO3) → | `MBUS TX`      |
+
+**For this module, RX connects to RX and TX connects to TX.** `MBUS RX` is the
+data output toward the controller; `MBUS TX` is the input from the controller.
+Do not cross these signals as you might with conventional UART labels.
+
+Connect the meter's M-Bus pair to `MBUS+` / `MBUS-`. The tested meter's M-Bus
+connection is non-polarized, so either meter M-Bus wire can go to either terminal.
+**Do not connect the meter's M-Bus wires directly to ESP GPIO pins.** A proper
+M-Bus master/transceiver is required.
+
+### M-Bus power supply and isolation
+
+The module has a separate M-Bus-side supply input, `5-24V` and `MGND`.
+A separate suitable 9 V supply was tested successfully; with no bus fault,
+approximately 36 V was measured across `MBUS+` / `MBUS-`.
+
+The final tested setup also worked from the ESP board's nominal 5 V rail:
+
+| ESP board | Module             |
+| --------- | ------------------ |
+| 3.3 V     | Digital `3.3-5VDC` |
+| GND       | Digital `GND`      |
+| 5 V       | M-Bus-side `5-24V` |
+| GND       | M-Bus-side `MGND`  |
+
+**This removes galvanic isolation because both grounds are tied together.**
+Operation from the 5 V rail is an observation on the tested hardware, not a
+guarantee that every ESP board's 5 V rail will work or provide enough current.
+
+To preserve galvanic isolation, use a separate suitable 5–24 V supply for the
+M-Bus side and do not connect `MGND` to the ESP digital ground. A 9–12 V external
+supply is a reasonable choice. Follow the module's specified input voltage and
+current requirements and use a suitably rated, current-limited supply for the
+connected bus load.
+
 ## Optical interface and polling
 
-The optical interface goes inactive after approximately **5 minutes without
+On the tested QALCOSONIC E3, the optical interface became inactive after approximately **5 minutes without
 communication**. After it sleeps, it requires local activation at the meter before communication resumes.
-The default **2-minute** polling interval intentionally keeps it awake. Use an
+The default **2-minute** polling interval was used successfully for a long period and intentionally keeps it awake. Use an
 interval below the inactivity timeout for continuous availability. Battery-current
 consumption has not been measured, so no battery-life impact is quantified.
+The optical interface is normally allowed to deactivate after inactivity;
+continuous polling below that timeout keeps it active.
+
+The optical interface was used successfully during development, but on the
+tested installation it later became unreliable despite previously working.
+No root cause was established, and this does not imply that all QALCOSONIC E3
+optical interfaces will fail. For permanent installations, wired M-Bus is
+therefore recommended when accessible.
+
+Wired installations do not have the observed optical five-minute timeout and
+can choose a longer `update_interval`. The global default remains two minutes
+for backwards compatibility. After five minutes of link inactivity the component
+resynchronizes with SND_NKE on either interface before requesting data.
 
 With automatic readout enabled, the first reading starts about 10 seconds after
 startup. Use `update_interval` to change the polling interval. Configure
@@ -184,6 +301,7 @@ The default `0` keeps the last measurements.
 ```yaml
 qalcosonic_e3:
   uart_id: mbus_uart
+  address: 0x01
   update_interval: 2min
   unavailable_after_failures: 5
 ```

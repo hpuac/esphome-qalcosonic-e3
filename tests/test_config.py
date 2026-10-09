@@ -35,6 +35,7 @@ def validate(value, expected=True):
 
 
 validated = validate(config)["qalcosonic_e3"][0]
+assert validated["address"] == 0x01
 assert validated["energy"]["state_class"] == "total_increasing"
 assert validated["volume"]["device_class"] == "water"
 assert validated["readout_failures"]["state_class"] == "measurement"
@@ -54,6 +55,13 @@ for threshold in (-1, 1.5, 4294967296, "invalid"):
     config["qalcosonic_e3"]["unavailable_after_failures"] = threshold
     validate(config, False)
 del config["qalcosonic_e3"]["unavailable_after_failures"]
+for address in (0, 0x01, 0x2C, 0xFE, 255, "0x2C"):
+    config["qalcosonic_e3"]["address"] = address
+    assert validate(config)["qalcosonic_e3"][0]["address"] == (44 if address == "0x2C" else address)
+for address in (-1, 256, 1.5, "invalid"):
+    config["qalcosonic_e3"]["address"] = address
+    validate(config, False)
+del config["qalcosonic_e3"]["address"]
 config["uart"]["parity"] = "NONE"
 validate(config, False)
 config["uart"]["parity"] = "EVEN"

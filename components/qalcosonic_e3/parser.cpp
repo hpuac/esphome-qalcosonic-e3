@@ -89,6 +89,7 @@ FrameResult parse_frame(const uint8_t *data, size_t size, MeterData &result) {
   if (data[1] < 15) return FrameResult::SHORT_HEADER;
 
   MeterData decoded;
+  decoded.response_address = data[5];
   char serial[9];
   std::snprintf(serial, sizeof(serial), "%02X%02X%02X%02X", static_cast<unsigned>(data[10]),
                 static_cast<unsigned>(data[9]), static_cast<unsigned>(data[8]), static_cast<unsigned>(data[7]));

@@ -6,9 +6,14 @@
 namespace esphome {
 namespace qalcosonic_e3 {
 
-// M-Bus link state for the meter's primary address 0x01.
+// M-Bus link state shared by optical and wired interfaces.
 class LinkState {
  public:
+  void set_address(uint8_t address) {
+    this->address_ = address;
+    this->reset();
+  }
+  uint8_t address() const { return this->address_; }
   bool needs_reset() const { return this->phase_ == Phase::NEED_RESET; }
   bool awaiting_ack() const { return this->phase_ == Phase::AWAITING_ACK; }
   void reset() {
@@ -20,11 +25,11 @@ class LinkState {
   std::array<uint8_t, 5> start() {
     if (this->needs_reset()) {
       this->phase_ = Phase::AWAITING_ACK;
-      return {{0x10, 0x40, 0x01, 0x41, 0x16}};  // SND_NKE
+      return this->short_frame_(0x40);  // SND_NKE
     }
     this->phase_ = Phase::AWAITING_DATA;
     const uint8_t control = this->next_fcb_ ? 0x7B : 0x5B;
-    return {{0x10, control, 0x01, static_cast<uint8_t>(control + 0x01), 0x16}};
+    return this->short_frame_(control);
   }
 
   bool accept_ack(uint8_t byte) {
@@ -55,6 +60,10 @@ class LinkState {
   }
 
  private:
+  std::array<uint8_t, 5> short_frame_(uint8_t control) const {
+    return {{0x10, control, this->address_, static_cast<uint8_t>(control + this->address_), 0x16}};
+  }
+  uint8_t address_{0x01};
   enum class Phase { NEED_RESET, AWAITING_ACK, READY, AWAITING_DATA };
   Phase phase_{Phase::NEED_RESET};
   bool next_fcb_{true};

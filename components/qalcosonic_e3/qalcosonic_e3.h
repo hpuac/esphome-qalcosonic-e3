@@ -23,6 +23,7 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   void read_now();
   void set_automatic_readout_enabled(bool enabled);
   void dump_config() override;
+  void set_address(uint8_t address) { this->link_.set_address(address); }
   float get_setup_priority() const override { return setup_priority::LATE; }
   void set_energy(sensor::Sensor *entity) { this->energy_ = entity; }
   void set_volume(sensor::Sensor *entity) { this->volume_ = entity; }

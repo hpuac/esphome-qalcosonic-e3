@@ -39,7 +39,7 @@ void QalcosonicE3::read_now() { this->request_read_(); }
 
 void QalcosonicE3::request_read_() {
   if (!this->ready_ || this->pending_) return;
-  // The optical interface goes inactive after five minutes without communication.
+  // Resynchronize after inactivity, including when an optical session expires.
   if (!this->link_.needs_reset() && millis() - this->last_link_activity_at_ >= LINK_IDLE_TIMEOUT_MS)
     this->link_.reset();
   // Discard bytes left over from a previous request before starting a new one.
@@ -57,7 +57,8 @@ void QalcosonicE3::send_link_request_() {
   const bool initializing = this->link_.needs_reset();
   const auto request = this->link_.start();
   this->requested_at_ = millis();
-  ESP_LOGD(TAG, "Sending M-Bus %s (0x%02X) to QALCOSONIC E3", initializing ? "SND_NKE" : "REQ_UD2", request[1]);
+  ESP_LOGD(TAG, "Sending M-Bus %s (0x%02X) to address 0x%02X", initializing ? "SND_NKE" : "REQ_UD2", request[1],
+           request[2]);
   this->write_array(request.data(), request.size());
 }
 
@@ -102,6 +103,8 @@ void QalcosonicE3::loop() {
     MeterData data;
     FrameResult error;
     if (this->receiver_.push(byte, data, error)) {
+      if (this->link_.address() == 0xFE)
+        ESP_LOGI(TAG, "Meter responded with primary address 0x%02X", data.response_address);
       this->pending_ = false;
       this->log_uart_trace_();
       this->link_.accept_response();
@@ -174,7 +177,7 @@ void QalcosonicE3::publish_(const MeterData &data) {
 }
 
 void QalcosonicE3::dump_config() {
-  ESP_LOGCONFIG(TAG, "QALCOSONIC E3 (optical M-Bus, address 0x01)");
+  ESP_LOGCONFIG(TAG, "QALCOSONIC E3 (M-Bus, address 0x%02X)", this->link_.address());
   LOG_UPDATE_INTERVAL(this);
   ESP_LOGCONFIG(TAG, "  Unavailable after consecutive failures: %lu (0 = disabled)",
                 static_cast<unsigned long>(this->unavailable_after_failures_));
