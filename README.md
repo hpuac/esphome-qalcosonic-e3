@@ -144,7 +144,11 @@ qalcosonic_e3:
   update_interval: 2min
 ```
 
-Recommended wired point-to-point setup, with **exactly one connected slave**:
+**Auto discovery, manual discovery, and explicit `0xFE` operation require exactly
+one connected M-Bus slave.** With multiple slaves, responses may collide. This
+component does not implement multi-slave scanning or secondary-address selection.
+
+Recommended wired point-to-point setup:
 
 ```yaml
 qalcosonic_e3:
@@ -160,7 +164,7 @@ read initializes a fresh link session at the discovered address. The discovered
 address is kept in RAM only; discovery runs again after reboot. A failed initial
 discovery retries `0xFE`, without assuming an address such as `0x01`.
 Auto discovery is valid for both optical and wired transports. It has been
-verified on wired M-Bus so far and is useful for single-slave setups.
+verified on wired M-Bus so far.
 
 Known wired address (`0x2C`, decimal 44, was the same meter's wired address):
 
@@ -172,7 +176,7 @@ qalcosonic_e3:
   update_interval: 15min
 ```
 
-Discovery/testing with **exactly one connected M-Bus slave**:
+Explicit test/point-to-point operation:
 
 ```yaml
 qalcosonic_e3:
@@ -181,11 +185,8 @@ qalcosonic_e3:
   address: 0xFE
 ```
 
-Both `address: auto` and manual discovery are safe only with **exactly one
-connected M-Bus slave**. Every connected slave recognizes the test/point-to-point address `0xFE`, so use
-it only with **exactly one slave connected**. Slaves respond using their real
-primary address, which is logged for discovery. It is not appropriate for normal
-multi-slave bus operation; this component does not implement a bus scanner.
+Every connected slave recognizes the test/point-to-point address `0xFE` and
+responds using its real primary address, which is logged for discovery.
 All requests to `0xFE`, including auto and manual discovery, accept only normal
 primary response addresses `0x00`–`0xFA`; responses with `0xFB`–`0xFF` are ignored.
 For normal targeted requests, responses from addresses other than the active
@@ -214,7 +215,7 @@ result and keeps using the configured address. Discovery does not persist to
 flash or publish measurements. A failed manual discovery keeps the previous
 active address; unresolved auto mode continues discovery on the next read.
 Presses during startup or an active read are ignored with a warning. The button
-also works when automatic readout is disabled. Use it only with one slave.
+also works when automatic readout is disabled.
 
 ## Optical wiring
 
