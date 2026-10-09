@@ -18,6 +18,15 @@ def diagnostic(schema):
     return schema.extend({cv.Optional(CONF_DISABLED_BY_DEFAULT, default=True): cv.boolean})
 
 
+def validate_address(value):
+    if isinstance(value, (float, bool)):
+        raise cv.Invalid("M-Bus address must be an integer")
+    address = cv.uint8_t(value)
+    if address > 0xFA and address != 0xFE:
+        raise cv.Invalid("Supported M-Bus addresses are 0x00–0xFA and the test/point-to-point address 0xFE")
+    return address
+
+
 SENSORS = {
     "energy": sensor.sensor_schema(
         accuracy_decimals=3,
@@ -130,7 +139,7 @@ CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(QalcosonicE3),
-            cv.Optional(CONF_ADDRESS, default=0x01): cv.uint8_t,
+            cv.Required(CONF_ADDRESS): validate_address,
             cv.Optional("unavailable_after_failures", default=0): cv.uint32_t,
             **{cv.Optional(key): schema for key, schema in SENSORS.items()},
             **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},

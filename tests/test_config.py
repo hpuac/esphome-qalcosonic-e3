@@ -46,6 +46,8 @@ assert validated["automatic_readout"]["restore_mode"] == "ALWAYS_ON"
 assert validated["automatic_readout"]["entity_category"] == "config"
 assert validated["unavailable_after_failures"] == 5
 config["qalcosonic_e3"] = {"uart_id": "mbus_uart"}
+validate(config, False)  # The interface's address must be configured explicitly.
+config["qalcosonic_e3"]["address"] = 0x01
 # Every entity is optional, and invalidation is disabled unless configured.
 assert validate(config)["qalcosonic_e3"][0]["unavailable_after_failures"] == 0
 for threshold in (0, 1, 5, 4294967295):
@@ -55,13 +57,15 @@ for threshold in (-1, 1.5, 4294967296, "invalid"):
     config["qalcosonic_e3"]["unavailable_after_failures"] = threshold
     validate(config, False)
 del config["qalcosonic_e3"]["unavailable_after_failures"]
-for address in (0, 0x01, 0x2C, 0xFE, 255, "0x2C"):
+for address in (0x00, 0x01, 0x2C, 0xFA, 0xFE, "0x2C", "0xFE"):
     config["qalcosonic_e3"]["address"] = address
-    assert validate(config)["qalcosonic_e3"][0]["address"] == (44 if address == "0x2C" else address)
-for address in (-1, 256, 1.5, "invalid"):
+    assert validate(config)["qalcosonic_e3"][0]["address"] == (
+        int(address, 16) if isinstance(address, str) else address
+    )
+for address in (-1, 0xFB, 0xFC, 0xFD, 0xFF, 256, 1.0, 1.5, "invalid"):
     config["qalcosonic_e3"]["address"] = address
     validate(config, False)
-del config["qalcosonic_e3"]["address"]
+config["qalcosonic_e3"]["address"] = 0x01
 config["uart"]["parity"] = "NONE"
 validate(config, False)
 config["uart"]["parity"] = "EVEN"

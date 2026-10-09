@@ -40,11 +40,13 @@ class LinkState {
     return true;
   }
 
-  void accept_response() {
-    if (this->phase_ != Phase::AWAITING_DATA) return;
+  bool accept_response(uint8_t response_address) {
+    if (this->phase_ != Phase::AWAITING_DATA || (this->address_ != 0xFE && response_address != this->address_))
+      return false;
     this->next_fcb_ = !this->next_fcb_;
     this->failed_requests_ = 0;
     this->phase_ = Phase::READY;
+    return true;
   }
 
   void timeout() {
@@ -63,7 +65,7 @@ class LinkState {
   std::array<uint8_t, 5> short_frame_(uint8_t control) const {
     return {{0x10, control, this->address_, static_cast<uint8_t>(control + this->address_), 0x16}};
   }
-  uint8_t address_{0x01};
+  uint8_t address_{0};  // Set from the required ESPHome address configuration before use.
   enum class Phase { NEED_RESET, AWAITING_ACK, READY, AWAITING_DATA };
   Phase phase_{Phase::NEED_RESET};
   bool next_fcb_{true};

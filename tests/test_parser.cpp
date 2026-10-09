@@ -7,6 +7,7 @@
 #include <iostream>
 #include <vector>
 
+#include "link.h"
 #include "parser.h"
 using namespace esphome::qalcosonic_e3;
 void near(const Value<float> &value, float expected) {
@@ -166,5 +167,25 @@ int main(int argc, char **argv) {
   near(data.temperature_difference, 12.05f);
   expect_clean_frame(wired);
   assert(data.response_address == 0x2C);
+  // Feed complete optical and wired frames through the receiver and address gate.
+  // An ignored frame must not prevent a matching frame in the same readout.
+  for (uint8_t address : {0x2C, 0xFE}) {
+    LinkState link;
+    link.set_address(address);
+    link.start();
+    assert(link.accept_ack(0xE5));
+    link.start();
+    receiver.clear();
+    unsigned responses = 0;
+    for (const auto *bytes : {&frame, &wired}) {
+      for (uint8_t b : *bytes) {
+        if (!receiver.push(b, data, error)) continue;
+        if (!link.accept_response(data.response_address)) continue;
+        ++responses;
+        if (address == 0xFE && responses == 1) link.start();
+      }
+    }
+    assert(responses == (address == 0xFE ? 2U : 1U));
+  }
   std::cout << "Parser and incremental receiver tests passed\n";
 }

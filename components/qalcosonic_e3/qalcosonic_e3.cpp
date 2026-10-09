@@ -103,11 +103,15 @@ void QalcosonicE3::loop() {
     MeterData data;
     FrameResult error;
     if (this->receiver_.push(byte, data, error)) {
+      if (!this->link_.accept_response(data.response_address)) {
+        ESP_LOGW(TAG, "Ignoring M-Bus response from address 0x%02X; expected 0x%02X", data.response_address,
+                 this->link_.address());
+        continue;
+      }
       if (this->link_.address() == 0xFE)
         ESP_LOGI(TAG, "Meter responded with primary address 0x%02X", data.response_address);
       this->pending_ = false;
       this->log_uart_trace_();
-      this->link_.accept_response();
       this->last_link_activity_at_ = millis();
       this->consecutive_failures_ = 0;
       this->measurements_invalidated_ = false;

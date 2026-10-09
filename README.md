@@ -119,10 +119,16 @@ even parity, and 1 stop bit. Use a dedicated UART with a 512-byte RX buffer.
 
 ## M-Bus primary address
 
-`address` accepts an unsigned 8-bit value (0–255), including hexadecimal notation.
-It defaults to `0x01` for backwards compatibility; that default is not guaranteed
-for wired M-Bus. Determine and configure the address for your own meter/interface.
-The same physical meter can have separate optical and wired primary addresses.
+`address` is **required**, with no default. Configure the primary address for
+the interface you use: optical and wired interfaces may have different primary
+addresses even on the same physical meter. On the tested meter, optical used
+`0x01` and wired M-Bus used `0x2C` (decimal 44).
+
+Supported normal primary addresses are `0x00`–`0xFA`; `0xFE` is also supported as
+a **test/point-to-point address**. Hexadecimal notation is supported.
+`0xFB`, `0xFC`, `0xFD`, and `0xFF` are not supported. Secondary addressing/selection
+with `0xFD` is not implemented. Broadcast address `0xFF` expects no response and
+is incompatible with this component's request/response behavior.
 
 Optical example (`0x01` was the tested meter's optical address):
 
@@ -150,9 +156,12 @@ qalcosonic_e3:
   address: 0xFE
 ```
 
-`0xFE` lets you test communication and observe the actual primary address in the
-logs. The response need not contain `0xFE`. It is not appropriate for normal
+Every connected slave recognizes the test/point-to-point address `0xFE`, so use
+it only with **exactly one slave connected**. Slaves respond using their real
+primary address, which is logged for discovery. It is not appropriate for normal
 multi-slave bus operation; this component does not implement a bus scanner.
+For normal configured addresses, responses from other addresses are ignored;
+the component keeps waiting for a matching response until timeout.
 On the tested wired interface, `10 40 FE 3E 16` (SND_NKE) received `E5`, and
 `10 5B FE 59 16` (REQ_UD2) received a valid frame with response address `0x2C`.
 Requests are generated from the configured address, with checksum
@@ -194,8 +203,10 @@ Tested digital wiring:
 | RX (GPIO2) ← | `MBUS RX`      |
 | TX (GPIO3) → | `MBUS TX`      |
 
-**For this module, RX connects to RX and TX connects to TX.** `MBUS RX` is the
-data output toward the controller; `MBUS TX` is the input from the controller.
+**For this module, RX connects to RX and TX connects to TX.**
+`ESP RX GPIO2 ← Zihatec MBUS RX`; `ESP TX GPIO3 → Zihatec MBUS TX`.
+`MBUS RX` is the isolated data **output** from the module toward the controller;
+`MBUS TX` is the isolated data **input** from the controller.
 Do not cross these signals as you might with conventional UART labels.
 
 Connect the meter's M-Bus pair to `MBUS+` / `MBUS-`. The tested meter's M-Bus
@@ -209,7 +220,9 @@ The module has a separate M-Bus-side supply input, `5-24V` and `MGND`.
 A separate suitable 9 V supply was tested successfully; with no bus fault,
 approximately 36 V was measured across `MBUS+` / `MBUS-`.
 
-The final tested setup also worked from the ESP board's nominal 5 V rail:
+#### Variant A: Shared ESP supply, no galvanic isolation
+
+The final tested setup worked from the development ESP32-C6 board's nominal 5 V rail:
 
 | ESP board | Module             |
 | --------- | ------------------ |
@@ -218,15 +231,100 @@ The final tested setup also worked from the ESP board's nominal 5 V rail:
 | 5 V       | M-Bus-side `5-24V` |
 | GND       | M-Bus-side `MGND`  |
 
-**This removes galvanic isolation because both grounds are tied together.**
+```mermaid
+flowchart LR
+  subgraph ESP["ESP32-C6 board / shared supply"]
+    A33["3.3V"]
+    AG["GND — common ESP supply ground"]
+    AR["RX GPIO2"]
+    AT["TX GPIO3"]
+    A5["5V"]
+  end
+  subgraph Z["Zihatec M-BUS Master Module"]
+    subgraph D["Digital side"]
+      D33["3.3-5VDC"]
+      DG["GND"]
+      DR["MBUS RX — OUTPUT"]
+      DT["MBUS TX — INPUT"]
+    end
+    subgraph B["M-Bus side"]
+      B5["5-24V"]
+      BG["MGND"]
+      BP["MBUS+"]
+      BM["MBUS-"]
+    end
+  end
+  subgraph M["QALCOSONIC E3 — non-polarized M-Bus pair"]
+    M1["M-Bus wire 1"]
+    M2["M-Bus wire 2"]
+  end
+  A33 --> D33
+  AG --- DG
+  DR --> AR
+  AT --> DT
+  A5 --> B5
+  AG --- BG
+  BP --- M1
+  BM --- M2
+```
+
+**Galvanic isolation is lost because digital GND and MGND are connected through the ESP supply.**
 Operation from the 5 V rail is an observation on the tested hardware, not a
 guarantee that every ESP board's 5 V rail will work or provide enough current.
 
+#### Variant B: Separate M-Bus-side supply, galvanic isolation preserved
+
 To preserve galvanic isolation, use a separate suitable 5–24 V supply for the
-M-Bus side and do not connect `MGND` to the ESP digital ground. A 9–12 V external
+M-Bus side. **Do not connect `MGND` to the ESP digital GND.** A separate 9 V
+supply was successfully tested. A 9–12 V external
 supply is a reasonable choice. Follow the module's specified input voltage and
 current requirements and use a suitably rated, current-limited supply for the
 connected bus load.
+
+```mermaid
+flowchart LR
+  subgraph ESP["ESP32-C6 — digital supply"]
+    A33["3.3V"]
+    AG["GND"]
+    AR["RX GPIO2"]
+    AT["TX GPIO3"]
+  end
+  subgraph Z["Zihatec M-BUS Master Module — galvanic isolation preserved"]
+    subgraph D["Digital side"]
+      D33["3.3-5VDC"]
+      DG["GND"]
+      DR["MBUS RX — OUTPUT"]
+      DT["MBUS TX — INPUT"]
+    end
+    subgraph B["M-Bus side — isolated from digital side"]
+      B5["5-24V"]
+      BG["MGND"]
+      BP["MBUS+"]
+      BM["MBUS-"]
+    end
+  end
+  subgraph P["Separate suitable supply — 9V tested / 5-24V input range"]
+    PP["+9V"]
+    PG["Supply GND — DO NOT connect to ESP GND"]
+  end
+  subgraph M["QALCOSONIC E3 — non-polarized M-Bus pair"]
+    M1["M-Bus wire 1"]
+    M2["M-Bus wire 2"]
+  end
+  A33 --> D33
+  AG --- DG
+  DR --> AR
+  AT --> DT
+  PP --> B5
+  PG --- BG
+  BP --- M1
+  BM --- M2
+```
+
+Both diagrams show RX connected to RX and TX connected to TX with arrows in the
+data direction. Either meter wire may connect to `MBUS+` or `MBUS-` on the tested
+non-polarized connection. The module's physical connector positions may differ
+from the diagram; follow the printed labels.
 
 ## Optical interface and polling
 
