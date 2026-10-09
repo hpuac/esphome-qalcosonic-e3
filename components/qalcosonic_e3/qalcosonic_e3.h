@@ -21,9 +21,12 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   void loop() override;
   void update() override;
   void read_now();
+  void discover_address();
   void set_automatic_readout_enabled(bool enabled);
   void dump_config() override;
   void set_address(uint8_t address) { this->link_.set_address(address); }
+  void set_auto_address() { this->link_.set_auto_address(); }
+  void set_transport(Transport transport) { this->link_.set_transport(transport); }
   float get_setup_priority() const override { return setup_priority::LATE; }
   void set_energy(sensor::Sensor *entity) { this->energy_ = entity; }
   void set_volume(sensor::Sensor *entity) { this->volume_ = entity; }
@@ -57,6 +60,7 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   bool uart_trace_truncated_{false};
   bool ready_{false};
   bool pending_{false};
+  bool manual_discovery_{false};
   FrameResult frame_error_{FrameResult::INCOMPLETE};
   bool measurements_invalidated_{false};
   bool automatic_readout_enabled_{true};
@@ -100,6 +104,15 @@ class AutomaticReadoutSwitch : public switch_::Switch, public Component {
 
  protected:
   void write_state(bool state) override;
+  QalcosonicE3 *parent_{nullptr};
+};
+
+class DiscoverAddressButton : public button::Button {
+ public:
+  void set_parent(QalcosonicE3 *parent) { this->parent_ = parent; }
+
+ protected:
+  void press_action() override { this->parent_->discover_address(); }
   QalcosonicE3 *parent_{nullptr};
 };
 }  // namespace qalcosonic_e3

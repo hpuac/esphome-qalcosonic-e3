@@ -6,6 +6,7 @@
 #include "link.h"
 
 using esphome::qalcosonic_e3::LinkState;
+using esphome::qalcosonic_e3::Transport;
 
 int main() {
   LinkState link;
@@ -84,6 +85,82 @@ int main() {
   assert(link.start()[1] == 0x5B);
   assert(link.accept_response(0x01));
   assert(link.start()[1] == 0x7B);
+
+  // Only optical transport expires its link session after inactivity.
+  for (Transport transport : {Transport::OPTICAL, Transport::WIRED}) {
+    link.set_transport(transport);
+    link.set_address(0x2C);
+    assert(link.start()[1] == 0x40);
+    assert(link.accept_ack(0xE5));
+    link.start();
+    assert(link.accept_response(0x2C));
+    link.prepare_read(299999);
+    assert(!link.needs_reset());
+    link.prepare_read(300001);
+    assert(link.needs_reset() == (transport == Transport::OPTICAL));
+    link.prepare_read(60 * 60 * 1000);
+    auto request = link.start();
+    assert(request[1] == (transport == Transport::OPTICAL ? 0x40 : 0x5B));
+    if (transport == Transport::OPTICAL) {
+      assert(link.accept_ack(0xE5));
+      request = link.start();
+    }
+    // Failure recovery remains active for wired even with long polling intervals.
+    for (unsigned i = 0; i < 3; ++i) {
+      link.timeout();
+      if (i < 2) assert(link.start() == request);
+    }
+    assert(link.needs_reset() && link.start()[1] == 0x40);
+  }
+
+  link.set_transport(Transport::WIRED);
+  link.set_auto_address();
+  assert(link.discovering() && link.request_address() == 0xFE);
+  assert(link.start()[1] == 0x40);
+  link.timeout();  // Missing discovery ACK retries 0xFE, never 0x01.
+  assert(link.discovering() && link.start()[2] == 0xFE);
+  assert(link.accept_ack(0xE5));
+  assert(link.start()[2] == 0xFE);
+  link.timeout();  // Missing discovery data also retries from SND_NKE.
+  assert(link.discovering() && link.start()[1] == 0x40);
+  assert(link.accept_ack(0xE5));
+  assert(link.start()[2] == 0xFE);
+  assert(!link.accept_response(0xFD));
+  assert(link.accept_response(0x2C));
+  assert(!link.discovering() && link.address() == 0x2C);
+  assert(link.start()[2] == 0x2C);  // Initialize the discovered targeted link.
+  assert(link.accept_ack(0xE5));
+  assert(link.start()[2] == 0x2C);
+  assert(!link.accept_response(0x01));
+  assert(link.accept_response(0x2C));
+  link.prepare_read(60 * 60 * 1000);
+  assert(link.start()[1] == 0x5B && link.address() == 0x2C);
+
+  link.start_discovery();  // Manual rediscovery updates only auto mode.
+  assert(link.start()[2] == 0xFE);
+  assert(link.accept_ack(0xE5));
+  link.start();
+  assert(link.accept_response(0x01) && link.address() == 0x01);
+  link.start_discovery();
+  link.start();
+  link.timeout();
+  assert(!link.discovering() && link.address() == 0x01);  // Keep last known address on failure.
+  link.set_auto_address();                                // Reboot configuration discovers again; nothing is persisted.
+  assert(link.discovering() && link.start()[2] == 0xFE);
+
+  link.set_address(0x2C);
+  link.start_discovery();
+  assert(link.configured_address() == 0x2C && link.address() == 0x2C);
+  assert(link.start()[2] == 0xFE);
+  assert(link.accept_ack(0xE5));
+  assert(link.start()[2] == 0xFE);
+  assert(link.accept_response(0x01));
+  assert(link.configured_address() == 0x2C && link.address() == 0x2C);
+  assert(link.start()[2] == 0x2C);
+  link.start_discovery();
+  link.start();
+  link.timeout();
+  assert(!link.discovering() && link.start()[2] == 0x2C);
 
   std::cout << "M-Bus link state tests passed\n";
 }

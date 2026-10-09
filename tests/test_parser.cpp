@@ -167,6 +167,16 @@ int main(int argc, char **argv) {
   near(data.temperature_difference, 12.05f);
   expect_clean_frame(wired);
   assert(data.response_address == 0x2C);
+  LinkState auto_link;
+  auto_link.set_auto_address();
+  assert(auto_link.start()[2] == 0xFE);
+  assert(auto_link.accept_ack(0xE5));
+  assert(auto_link.start()[2] == 0xFE);
+  receiver.clear();
+  for (uint8_t b : wired) {
+    if (receiver.push(b, data, error)) assert(auto_link.accept_response(data.response_address));
+  }
+  assert(auto_link.address() == 0x2C && auto_link.start()[2] == 0x2C);
   // Feed complete optical and wired frames through the receiver and address gate.
   // An ignored frame must not prevent a matching frame in the same readout.
   for (uint8_t address : {0x2C, 0xFE}) {

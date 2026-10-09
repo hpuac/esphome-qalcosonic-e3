@@ -71,6 +71,7 @@ uart:
 
 qalcosonic_e3:
   uart_id: mbus_uart
+  transport: optical
   address: 0x01
   update_interval: 2min
   energy:
@@ -108,6 +109,7 @@ below apply when an entity is configured. Diagnostic entities are disabled in Ho
 ```yaml
 qalcosonic_e3:
   uart_id: mbus_uart
+  transport: optical
   address: 0x01
   error_code:
     name: "Error Code"
@@ -119,7 +121,9 @@ even parity, and 1 stop bit. Use a dedicated UART with a 512-byte RX buffer.
 
 ## M-Bus primary address
 
-`address` is **required**, with no default. Configure the primary address for
+`transport` is **required** and accepts exactly `optical` or `wired`. Both use
+one shared parser. `address` is also **required**, with no default, and accepts
+`auto` or a supported numeric address. Configure the primary address for
 the interface you use: optical and wired interfaces may have different primary
 addresses even on the same physical meter. On the tested meter, optical used
 `0x01` and wired M-Bus used `0x2C` (decimal 44).
@@ -135,17 +139,35 @@ Optical example (`0x01` was the tested meter's optical address):
 ```yaml
 qalcosonic_e3:
   uart_id: mbus_uart
+  transport: optical
   address: 0x01
   update_interval: 2min
 ```
 
-Wired example (`0x2C`, decimal 44, was the same meter's wired address):
+Recommended wired point-to-point setup, with **exactly one connected slave**:
 
 ```yaml
 qalcosonic_e3:
   uart_id: mbus_uart
+  transport: wired
+  address: auto
+  update_interval: 15min
+```
+
+Auto mode sends SND_NKE and REQ_UD2 to `0xFE`, logs the discovered primary
+address, and uses that address for following normal reads. The first targeted
+read initializes a fresh link session at the discovered address. The discovered
+address is kept in RAM only; discovery runs again after reboot. A failed initial
+discovery retries `0xFE`, without assuming an address such as `0x01`.
+
+Known wired address (`0x2C`, decimal 44, was the same meter's wired address):
+
+```yaml
+qalcosonic_e3:
+  uart_id: mbus_uart
+  transport: wired
   address: 0x2C
-  update_interval: 2min
+  update_interval: 15min
 ```
 
 Discovery/testing with **exactly one connected M-Bus slave**:
@@ -153,20 +175,42 @@ Discovery/testing with **exactly one connected M-Bus slave**:
 ```yaml
 qalcosonic_e3:
   uart_id: mbus_uart
+  transport: wired
   address: 0xFE
 ```
 
-Every connected slave recognizes the test/point-to-point address `0xFE`, so use
+Both `address: auto` and manual discovery are safe only with **exactly one
+connected M-Bus slave**. Every connected slave recognizes the test/point-to-point address `0xFE`, so use
 it only with **exactly one slave connected**. Slaves respond using their real
 primary address, which is logged for discovery. It is not appropriate for normal
 multi-slave bus operation; this component does not implement a bus scanner.
-For normal configured addresses, responses from other addresses are ignored;
-the component keeps waiting for a matching response until timeout.
+For normal targeted requests, responses from addresses other than the active
+address are ignored; the component keeps waiting for a matching response until timeout.
 On the tested wired interface, `10 40 FE 3E 16` (SND_NKE) received `E5`, and
 `10 5B FE 59 16` (REQ_UD2) received a valid frame with response address `0x2C`.
-Requests are generated from the configured address, with checksum
+Requests are generated from the active request address, with checksum
 `(control + address) & 0xFF`. REQ_UD2 retains the existing alternating frame count
 bit (`0x7B` / `0x5B`) and retry behavior.
+
+### Manual address discovery
+
+```yaml
+qalcosonic_e3:
+  uart_id: mbus_uart
+  transport: wired
+  address: auto
+  update_interval: 15min
+  discover_address:
+    name: "Discover M-Bus Address"
+```
+
+The optional button starts discovery via `0xFE` and logs the result. In auto mode
+it updates the runtime address; with a numeric address it only reports the
+result and keeps using the configured address. Discovery does not persist to
+flash or publish measurements. A failed manual discovery keeps the previous
+active address; unresolved auto mode continues discovery on the next read.
+Presses during startup or an active read are ignored with a warning. The button
+also works when automatic readout is disabled. Use it only with one slave.
 
 ## Optical wiring
 
@@ -214,123 +258,58 @@ connection is non-polarized, so either meter M-Bus wire can go to either termina
 **Do not connect the meter's M-Bus wires directly to ESP GPIO pins.** A proper
 M-Bus master/transceiver is required.
 
-### M-Bus power supply and isolation
+### Recommended wiring: Shared ESP supply, no galvanic isolation
 
-The module has a separate M-Bus-side supply input, `5-24V` and `MGND`.
-A separate suitable 9 V supply was tested successfully; with no bus fault,
-approximately 36 V was measured across `MBUS+` / `MBUS-`.
+This wiring uses the **exact Zihatec M-BUS Master Module linked above**:
 
-#### Variant A: Shared ESP supply, no galvanic isolation
-
-The final tested setup worked from the development ESP32-C6 board's nominal 5 V rail:
-
-| ESP board | Module             |
-| --------- | ------------------ |
-| 3.3 V     | Digital `3.3-5VDC` |
-| GND       | Digital `GND`      |
-| 5 V       | M-Bus-side `5-24V` |
-| GND       | M-Bus-side `MGND`  |
-
-```mermaid
-flowchart LR
-  subgraph ESP["ESP32-C6 board / shared supply"]
-    A33["3.3V"]
-    AG["GND — common ESP supply ground"]
-    AR["RX GPIO2"]
-    AT["TX GPIO3"]
-    A5["5V"]
-  end
-  subgraph Z["Zihatec M-BUS Master Module"]
-    subgraph D["Digital side"]
-      D33["3.3-5VDC"]
-      DG["GND"]
-      DR["MBUS RX — OUTPUT"]
-      DT["MBUS TX — INPUT"]
-    end
-    subgraph B["M-Bus side"]
-      B5["5-24V"]
-      BG["MGND"]
-      BP["MBUS+"]
-      BM["MBUS-"]
-    end
-  end
-  subgraph M["QALCOSONIC E3 — non-polarized M-Bus pair"]
-    M1["M-Bus wire 1"]
-    M2["M-Bus wire 2"]
-  end
-  A33 --> D33
-  AG --- DG
-  DR --> AR
-  AT --> DT
-  A5 --> B5
-  AG --- BG
-  BP --- M1
-  BM --- M2
+```text
+ESP32-C6                    Zihatec M-BUS Master             QALCOSONIC E3
+─────────                   ────────────────────             ─────────────
+3.3V   ───────────────────> 3.3-5VDC
+GND    ───────────────────> GND
+GPIO2  <─────────────────── MBUS RX
+GPIO3  ───────────────────> MBUS TX
+5V     ───────────────────> 5-24V
+GND    ───────────────────> MGND
+                            MBUS+ ────────────────────────── M-Bus
+                            MBUS- ────────────────────────── M-Bus
 ```
 
-**Galvanic isolation is lost because digital GND and MGND are connected through the ESP supply.**
-Operation from the 5 V rail is an observation on the tested hardware, not a
-guarantee that every ESP board's 5 V rail will work or provide enough current.
+This exact setup was tested successfully: the development ESP32-C6 board's
+nominal 5 V rail powered the M-Bus side for a single meter. No separate external
+supply is required for that tested setup. Digital GND and MGND are common through
+the ESP supply, so **galvanic isolation is lost**. Other ESP boards may have
+weaker 5 V rails; sufficient voltage/current is not universally guaranteed.
 
-#### Variant B: Separate M-Bus-side supply, galvanic isolation preserved
+`ESP RX GPIO2 ← Zihatec MBUS RX`; `ESP TX GPIO3 → Zihatec MBUS TX`.
+For this specific module **RX connects to RX and TX connects to TX**.
+The tested meter's pair is non-polarized: either wire can connect to `MBUS+` or
+`MBUS-`. Never connect those wires directly to ESP GPIO.
 
-To preserve galvanic isolation, use a separate suitable 5–24 V supply for the
-M-Bus side. **Do not connect `MGND` to the ESP digital GND.** A separate 9 V
-supply was successfully tested. A 9–12 V external
-supply is a reasonable choice. Follow the module's specified input voltage and
-current requirements and use a suitably rated, current-limited supply for the
-connected bus load.
+If isolation is desired or the board's 5 V rail is insufficient, a separate
+suitable 5–24 V supply is an optional alternative. A 9 V external supply was
+successfully tested and produced approximately 36 V across `MBUS+` / `MBUS-`
+with no bus fault. Follow the module's voltage/current limits and use a suitably
+rated, current-limited supply; 9–12 V is a reasonable choice.
 
-```mermaid
-flowchart LR
-  subgraph ESP["ESP32-C6 — digital supply"]
-    A33["3.3V"]
-    AG["GND"]
-    AR["RX GPIO2"]
-    AT["TX GPIO3"]
-  end
-  subgraph Z["Zihatec M-BUS Master Module — galvanic isolation preserved"]
-    subgraph D["Digital side"]
-      D33["3.3-5VDC"]
-      DG["GND"]
-      DR["MBUS RX — OUTPUT"]
-      DT["MBUS TX — INPUT"]
-    end
-    subgraph B["M-Bus side — isolated from digital side"]
-      B5["5-24V"]
-      BG["MGND"]
-      BP["MBUS+"]
-      BM["MBUS-"]
-    end
-  end
-  subgraph P["Separate suitable supply — 9V tested / 5-24V input range"]
-    PP["+9V"]
-    PG["Supply GND — DO NOT connect to ESP GND"]
-  end
-  subgraph M["QALCOSONIC E3 — non-polarized M-Bus pair"]
-    M1["M-Bus wire 1"]
-    M2["M-Bus wire 2"]
-  end
-  A33 --> D33
-  AG --- DG
-  DR --> AR
-  AT --> DT
-  PP --> B5
-  PG --- BG
-  BP --- M1
-  BM --- M2
+```text
+ESP32 digital wiring: same 3.3V, GND, GPIO2 and GPIO3 connections as above
+External +9V (or suitable 5–24V) ───> Zihatec 5-24V
+External supply GND             ───> Zihatec MGND
+Meter M-Bus pair: same MBUS+ / MBUS- connections as above
 ```
 
-Both diagrams show RX connected to RX and TX connected to TX with arrows in the
-data direction. Either meter wire may connect to `MBUS+` or `MBUS-` on the tested
-non-polarized connection. The module's physical connector positions may differ
-from the diagram; follow the printed labels.
+To preserve galvanic isolation, **do not connect MGND or external supply GND to
+ESP digital GND**. In this alternative, the ESP 5 V rail is not connected to the
+module's `5-24V` input.
 
 ## Optical interface and polling
 
 On the tested QALCOSONIC E3, the optical interface became inactive after approximately **5 minutes without
 communication**. After it sleeps, it requires local activation at the meter before communication resumes.
-The default **2-minute** polling interval was used successfully for a long period and intentionally keeps it awake. Use an
+The **2-minute** polling interval was used successfully for a long period. It
+was chosen deliberately to leave margin for failed reads while keeping the
+interface available. Use an
 interval below the inactivity timeout for continuous availability. Battery-current
 consumption has not been measured, so no battery-life impact is quantified.
 The optical interface is normally allowed to deactivate after inactivity;
@@ -342,10 +321,13 @@ No root cause was established, and this does not imply that all QALCOSONIC E3
 optical interfaces will fail. For permanent installations, wired M-Bus is
 therefore recommended when accessible.
 
-Wired installations do not have the observed optical five-minute timeout and
-can choose a longer `update_interval`. The global default remains two minutes
-for backwards compatibility. After five minutes of link inactivity the component
-resynchronizes with SND_NKE on either interface before requesting data.
+With `transport: optical`, about five minutes without link activity resets the
+link so the next read starts with SND_NKE. With `transport: wired`, no optical-style
+five-minute timeout is applied: polling intervals such as 15 minutes or one hour
+do not force link resets. Choose the wired polling interval for your use case;
+the global default remains two minutes, with 15 minutes recommended above.
+Both transports start the first read after boot with SND_NKE and resynchronize
+after failed communication. Alternating FCB and retry behavior are preserved.
 
 With automatic readout enabled, the first reading starts about 10 seconds after
 startup. Use `update_interval` to change the polling interval. Configure
@@ -377,6 +359,7 @@ The component only reads meter data; it does not change meter settings.
 | `readout_successful`           | Binary sensor | —    | Enabled  | Diagnostic |
 | `readout_failures`             | Sensor        | —    | Disabled | Diagnostic |
 | `automatic_readout`            | Switch        | —    | Enabled  | Config     |
+| `discover_address`             | Button        | —    | Enabled  | Config     |
 | `read_now`                     | Button        | —    | Enabled  | Config     |
 
 Battery operating duration is **elapsed operating time**, not percentage or
@@ -399,6 +382,7 @@ The default `0` keeps the last measurements.
 ```yaml
 qalcosonic_e3:
   uart_id: mbus_uart
+  transport: optical
   address: 0x01
   update_interval: 2min
   unavailable_after_failures: 5

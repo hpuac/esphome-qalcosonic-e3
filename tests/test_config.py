@@ -45,8 +45,20 @@ assert validated["readout_successful"]["device_class"] == "connectivity"
 assert validated["automatic_readout"]["restore_mode"] == "ALWAYS_ON"
 assert validated["automatic_readout"]["entity_category"] == "config"
 assert validated["unavailable_after_failures"] == 5
-config["qalcosonic_e3"] = {"uart_id": "mbus_uart"}
+config["qalcosonic_e3"] = {"uart_id": "mbus_uart", "transport": "optical"}
 validate(config, False)  # The interface's address must be configured explicitly.
+config["qalcosonic_e3"]["address"] = 0x01
+del config["qalcosonic_e3"]["transport"]
+validate(config, False)
+for transport in ("optical", "wired"):
+    config["qalcosonic_e3"]["transport"] = transport
+    assert validate(config)["qalcosonic_e3"][0]["transport"] == transport
+for transport in ("invalid", "OPTICAL", 0):
+    config["qalcosonic_e3"]["transport"] = transport
+    validate(config, False)
+config["qalcosonic_e3"]["transport"] = "optical"
+config["qalcosonic_e3"]["address"] = "auto"
+assert validate(config)["qalcosonic_e3"][0]["address"] == "auto"
 config["qalcosonic_e3"]["address"] = 0x01
 # Every entity is optional, and invalidation is disabled unless configured.
 assert validate(config)["qalcosonic_e3"][0]["unavailable_after_failures"] == 0
