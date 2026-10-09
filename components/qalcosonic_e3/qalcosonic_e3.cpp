@@ -151,6 +151,12 @@ void QalcosonicE3::loop() {
     const bool awaiting_ack = this->link_.awaiting_ack();
     this->link_.timeout();
     if (this->manual_discovery_) {
+      if (!this->link_.needs_reset()) {
+        ESP_LOGD(TAG, "Retrying M-Bus address discovery with the same REQ_UD2 FCB");
+        this->request_read_();
+        return;
+      }
+      this->link_.end_discovery();
       this->manual_discovery_ = false;
       ESP_LOGW(TAG, "M-Bus address discovery timed out; active address remains 0x%02X", this->link_.address());
       this->receiver_.clear();

@@ -35,6 +35,11 @@ class LinkState {
     this->discovering_ = true;
     this->reset();
   }
+  void end_discovery() {
+    // Keep unresolved auto mode ready to discover again on the next readout.
+    this->discovering_ = this->auto_address_ && !this->address_discovered_;
+    this->reset();
+  }
   void prepare_read(uint32_t idle_ms) {
     if (this->transport_ == Transport::OPTICAL && idle_ms >= 5 * 60 * 1000) this->reset();
   }
@@ -86,16 +91,10 @@ class LinkState {
   }
 
   void timeout() {
-    if (this->discovering_) {
-      // An unresolved auto address retries discovery, never an assumed address.
-      this->discovering_ = this->auto_address_ && !this->address_discovered_;
-      this->reset();
-      return;
-    }
     if (this->awaiting_ack()) {
       this->reset();
     } else if (this->phase_ == Phase::AWAITING_DATA) {
-      // Retry the same FCB twice; then resynchronize on the next readout.
+      // Retry the same FCB twice, including discovery; then resynchronize.
       if (++this->failed_requests_ >= 3)
         this->reset();
       else

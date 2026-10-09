@@ -120,11 +120,11 @@ int main() {
   link.timeout();  // Missing discovery ACK retries 0xFE, never 0x01.
   assert(link.discovering() && link.start()[2] == 0xFE);
   assert(link.accept_ack(0xE5));
-  assert(link.start()[2] == 0xFE);
-  link.timeout();  // Missing discovery data also retries from SND_NKE.
-  assert(link.discovering() && link.start()[1] == 0x40);
-  assert(link.accept_ack(0xE5));
-  assert(link.start()[2] == 0xFE);
+  const auto auto_request = link.start();
+  assert(auto_request[1] == 0x7B && auto_request[2] == 0xFE);
+  link.timeout();  // Hardware regression: retry REQ_UD2 without another SND_NKE.
+  assert(link.discovering() && !link.needs_reset());
+  assert(link.address() == 0xFE && link.start() == auto_request);
   assert(!link.accept_response(0xFD));
   assert(link.accept_response(0x2C));
   assert(!link.discovering() && link.address() == 0x2C);
@@ -144,6 +144,8 @@ int main() {
   link.start_discovery();
   link.start();
   link.timeout();
+  assert(link.discovering());
+  link.end_discovery();                                   // Component ends a manual operation after ACK failure.
   assert(!link.discovering() && link.address() == 0x01);  // Keep last known address on failure.
   link.set_auto_address();                                // Reboot configuration discovers again; nothing is persisted.
   assert(link.discovering() && link.start()[2] == 0xFE);
@@ -160,6 +162,8 @@ int main() {
   link.start_discovery();
   link.start();
   link.timeout();
+  assert(link.discovering());
+  link.end_discovery();
   assert(!link.discovering() && link.start()[2] == 0x2C);
 
   // All 0xFE requests accept only real primary addresses, on either transport.
@@ -196,6 +200,84 @@ int main() {
         else
           assert(link.address() == 0x2C && !link.discovering());
       }
+    }
+  }
+
+  enum class ReadMode { EXPLICIT_FE, AUTO, MANUAL_EXPLICIT, MANUAL_AUTO };
+  auto prepare_discovery = [&](ReadMode mode) {
+    if (mode == ReadMode::EXPLICIT_FE)
+      link.set_address(0xFE);
+    else if (mode == ReadMode::AUTO)
+      link.set_auto_address();
+    else if (mode == ReadMode::MANUAL_EXPLICIT) {
+      link.set_address(0x09);
+      link.start_discovery();
+    } else {
+      link.set_auto_address();
+      link.start();
+      assert(link.accept_ack(0xE5));
+      link.start();
+      assert(link.accept_response(0x09));
+      link.start_discovery();
+    }
+  };
+  for (Transport transport : {Transport::OPTICAL, Transport::WIRED}) {
+    link.set_transport(transport);
+    for (ReadMode mode : {ReadMode::EXPLICIT_FE, ReadMode::AUTO, ReadMode::MANUAL_EXPLICIT, ReadMode::MANUAL_AUTO}) {
+      // The hardware responds to the same REQ_UD2 on retry, without another reset.
+      for (unsigned timeouts : {1U, 2U}) {
+        prepare_discovery(mode);
+        assert(link.start()[1] == 0x40);
+        assert(link.accept_ack(0xE5));
+        const auto request = link.start();
+        assert(request[1] == 0x7B && request[2] == 0xFE);
+        for (unsigned i = 0; i < timeouts; ++i) {
+          link.timeout();
+          assert(!link.needs_reset());
+          assert(link.discovering() == (mode != ReadMode::EXPLICIT_FE));
+          assert(link.start() == request);
+        }
+        assert(!link.accept_response(0xFE));
+        assert(link.accept_response(0x2C));
+        assert(!link.discovering());
+        if (mode == ReadMode::EXPLICIT_FE)
+          assert(link.start()[1] == 0x5B);
+        else {
+          const uint8_t target = mode == ReadMode::MANUAL_EXPLICIT ? 0x09 : 0x2C;
+          assert(link.address() == target);
+          const auto reset_request = link.start();
+          assert(reset_request[1] == 0x40 && reset_request[2] == target);
+          assert(link.accept_ack(0xE5));
+          assert(link.start()[2] == target);
+          assert(!link.accept_response(target == 0x09 ? 0x2C : 0x09));
+          assert(link.accept_response(target));
+        }
+      }
+
+      prepare_discovery(mode);
+      link.start();
+      link.timeout();  // ACK failure still resets immediately.
+      assert(link.needs_reset());
+      assert(link.discovering() == (mode != ReadMode::EXPLICIT_FE));
+      assert(link.start()[1] == 0x40);
+      assert(link.accept_ack(0xE5));
+      const auto request = link.start();
+      for (unsigned i = 0; i < 3; ++i) {
+        link.timeout();
+        assert(link.discovering() == (mode != ReadMode::EXPLICIT_FE));
+        assert(link.needs_reset() == (i == 2));
+        if (i < 2) assert(link.start() == request);
+      }
+      if (mode == ReadMode::MANUAL_EXPLICIT || mode == ReadMode::MANUAL_AUTO) {
+        link.end_discovery();  // Manual operation gives up only after exhaustion.
+        assert(!link.discovering() && link.address() == 0x09);
+        if (mode == ReadMode::MANUAL_EXPLICIT) assert(link.configured_address() == 0x09);
+      } else {
+        assert(link.address() == 0xFE && link.request_address() == 0xFE);
+      }
+      const auto reset_request = link.start();
+      assert(reset_request[1] == 0x40);
+      assert(reset_request[2] == (mode == ReadMode::MANUAL_EXPLICIT || mode == ReadMode::MANUAL_AUTO ? 0x09 : 0xFE));
     }
   }
 

@@ -171,7 +171,10 @@ int main(int argc, char **argv) {
   auto_link.set_auto_address();
   assert(auto_link.start()[2] == 0xFE);
   assert(auto_link.accept_ack(0xE5));
-  assert(auto_link.start()[2] == 0xFE);
+  const auto discovery_request = auto_link.start();
+  assert(discovery_request[1] == 0x7B && discovery_request[2] == 0xFE);
+  auto_link.timeout();
+  assert(auto_link.discovering() && auto_link.start() == discovery_request);
   receiver.clear();
   for (uint8_t b : wired) {
     if (receiver.push(b, data, error)) assert(auto_link.accept_response(data.response_address));
