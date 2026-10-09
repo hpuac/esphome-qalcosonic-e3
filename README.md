@@ -159,6 +159,8 @@ address, and uses that address for following normal reads. The first targeted
 read initializes a fresh link session at the discovered address. The discovered
 address is kept in RAM only; discovery runs again after reboot. A failed initial
 discovery retries `0xFE`, without assuming an address such as `0x01`.
+Auto discovery is valid for both optical and wired transports. It has been
+verified on wired M-Bus so far and is useful for single-slave setups.
 
 Known wired address (`0x2C`, decimal 44, was the same meter's wired address):
 
@@ -184,6 +186,8 @@ connected M-Bus slave**. Every connected slave recognizes the test/point-to-poin
 it only with **exactly one slave connected**. Slaves respond using their real
 primary address, which is logged for discovery. It is not appropriate for normal
 multi-slave bus operation; this component does not implement a bus scanner.
+All requests to `0xFE`, including auto and manual discovery, accept only normal
+primary response addresses `0x00`–`0xFA`; responses with `0xFB`–`0xFF` are ignored.
 For normal targeted requests, responses from addresses other than the active
 address are ignored; the component keeps waiting for a matching response until timeout.
 On the tested wired interface, `10 40 FE 3E 16` (SND_NKE) received `E5`, and
@@ -325,7 +329,9 @@ With `transport: optical`, about five minutes without link activity resets the
 link so the next read starts with SND_NKE. With `transport: wired`, no optical-style
 five-minute timeout is applied: polling intervals such as 15 minutes or one hour
 do not force link resets. Choose the wired polling interval for your use case;
-the global default remains two minutes, with 15 minutes recommended above.
+the global default remains two minutes. 15 minutes is used as an example for
+wired installations. Choose the interval according to your use case; shorter
+and longer intervals are supported without an optical-style inactivity constraint.
 Both transports start the first read after boot with SND_NKE and resynchronize
 after failed communication. Alternating FCB and retry behavior are preserved.
 

@@ -67,7 +67,7 @@ class LinkState {
   bool accept_response(uint8_t response_address) {
     const uint8_t requested = this->request_address();
     if (this->phase_ != Phase::AWAITING_DATA || (requested != 0xFE && response_address != requested) ||
-        (this->discovering_ && response_address > 0xFA))
+        (requested == 0xFE && response_address > 0xFA))
       return false;
     if (this->discovering_) {
       if (this->auto_address_) {

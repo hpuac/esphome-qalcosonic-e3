@@ -56,9 +56,11 @@ for transport in ("optical", "wired"):
 for transport in ("invalid", "OPTICAL", 0):
     config["qalcosonic_e3"]["transport"] = transport
     validate(config, False)
-config["qalcosonic_e3"]["transport"] = "optical"
 config["qalcosonic_e3"]["address"] = "auto"
-assert validate(config)["qalcosonic_e3"][0]["address"] == "auto"
+for transport in ("optical", "wired"):
+    config["qalcosonic_e3"]["transport"] = transport
+    assert validate(config)["qalcosonic_e3"][0]["address"] == "auto"
+config["qalcosonic_e3"]["transport"] = "optical"
 config["qalcosonic_e3"]["address"] = 0x01
 # Every entity is optional, and invalidation is disabled unless configured.
 assert validate(config)["qalcosonic_e3"][0]["unavailable_after_failures"] == 0

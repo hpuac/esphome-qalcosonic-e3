@@ -17,7 +17,7 @@ int main() {
     assert((link.start() == std::array<uint8_t, 5>{{0x10, 0x40, address, reset_checksum, 0x16}}));
     assert(link.accept_ack(0xE5));
     assert((link.start() == std::array<uint8_t, 5>{{0x10, 0x7B, address, static_cast<uint8_t>(0x7B + address), 0x16}}));
-    assert(link.accept_response(address));
+    assert(link.accept_response(address == 0xFE ? 0x2C : address));
     assert((link.start() == std::array<uint8_t, 5>{{0x10, 0x5B, address, request_checksum, 0x16}}));
     link.reset();
     assert(link.address() == address);
@@ -161,6 +161,43 @@ int main() {
   link.start();
   link.timeout();
   assert(!link.discovering() && link.start()[2] == 0x2C);
+
+  // All 0xFE requests accept only real primary addresses, on either transport.
+  for (Transport transport : {Transport::OPTICAL, Transport::WIRED}) {
+    for (unsigned mode = 0; mode < 3; ++mode) {
+      for (uint8_t valid_address : {0x00, 0x01, 0x2C, 0xFA}) {
+        link.set_transport(transport);
+        if (mode == 0)
+          link.set_address(0xFE);
+        else if (mode == 1)
+          link.set_auto_address();
+        else {
+          link.set_address(0x2C);
+          link.start_discovery();
+        }
+        assert(link.start()[2] == 0xFE);
+        assert(link.accept_ack(0xE5));
+        const auto discovery_request = link.start();
+        for (uint8_t invalid_address : {0xFB, 0xFC, 0xFD, 0xFE, 0xFF}) {
+          assert(!link.accept_response(invalid_address));
+          assert(link.request_address() == 0xFE);
+          assert(!link.needs_reset());
+        }
+        // Invalid responses neither complete the read nor advance its FCB.
+        if (mode == 0) {
+          link.timeout();
+          assert(link.start() == discovery_request);
+        }
+        assert(link.accept_response(valid_address));
+        if (mode == 0)
+          assert(link.start()[1] == 0x5B);
+        else if (mode == 1)
+          assert(link.address() == valid_address && !link.discovering());
+        else
+          assert(link.address() == 0x2C && !link.discovering());
+      }
+    }
+  }
 
   std::cout << "M-Bus link state tests passed\n";
 }
