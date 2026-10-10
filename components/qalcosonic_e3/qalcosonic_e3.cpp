@@ -146,16 +146,21 @@ void QalcosonicE3::loop() {
   // Process already-buffered UART data before declaring a request timed out.
   // Unsigned subtraction remains correct across millis() wraparound.
   if (this->pending_ && millis() - this->requested_at_ >= 2000) {
-    this->pending_ = false;
     this->log_uart_trace_();
     const bool awaiting_ack = this->link_.awaiting_ack();
     this->link_.timeout();
+    if (!this->link_.needs_reset()) {
+      // Continue the same logical readout; only exhaustion updates diagnostics.
+      ESP_LOGD(TAG, "Retrying M-Bus REQ_UD2 with the same FCB");
+      this->receiver_.clear();
+      this->uart_trace_size_ = 0;
+      this->uart_trace_truncated_ = false;
+      this->frame_error_ = FrameResult::INCOMPLETE;
+      this->send_link_request_();
+      return;
+    }
+    this->pending_ = false;
     if (this->manual_discovery_) {
-      if (!this->link_.needs_reset()) {
-        ESP_LOGD(TAG, "Retrying M-Bus address discovery with the same REQ_UD2 FCB");
-        this->request_read_();
-        return;
-      }
       this->link_.end_discovery();
       this->manual_discovery_ = false;
       ESP_LOGW(TAG, "M-Bus address discovery timed out; active address remains 0x%02X", this->link_.address());
