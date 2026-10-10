@@ -60,11 +60,13 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   bool uart_trace_truncated_{false};
   bool ready_{false};
   bool pending_{false};
+  bool waiting_for_data_request_{false};
   bool manual_discovery_{false};
   FrameResult frame_error_{FrameResult::INCOMPLETE};
   bool measurements_invalidated_{false};
   bool automatic_readout_enabled_{true};
   uint32_t requested_at_{0};
+  uint32_t readout_generation_{0};
   uint32_t last_link_activity_at_{0};
   uint32_t consecutive_failures_{0};
   uint32_t unavailable_after_failures_{0};

@@ -48,6 +48,9 @@ void QalcosonicE3::discover_address() {
 
 void QalcosonicE3::request_read_() {
   if (!this->ready_ || this->pending_) return;
+  this->cancel_timeout("post_ack_request");
+  this->waiting_for_data_request_ = false;
+  ++this->readout_generation_;
   this->link_.prepare_read(millis() - this->last_link_activity_at_);
   if (this->link_.discovering()) ESP_LOGI(TAG, "Starting M-Bus address discovery using 0xFE");
   // Discard bytes left over from a previous request before starting a new one.
@@ -101,10 +104,19 @@ void QalcosonicE3::loop() {
       this->uart_trace_[this->uart_trace_size_++] = byte;
     else
       this->uart_trace_truncated_ = true;
+    if (this->waiting_for_data_request_) continue;
     if (this->link_.awaiting_ack()) {
       if (this->link_.accept_ack(byte)) {
         this->last_link_activity_at_ = millis();
-        this->send_link_request_();
+        this->waiting_for_data_request_ = true;
+        const uint32_t generation = this->readout_generation_;
+        ESP_LOGD(TAG, "Scheduling M-Bus REQ_UD2 100 ms after SND_NKE acknowledgement");
+        this->set_timeout("post_ack_request", 100, [this, generation]() {
+          if (generation != this->readout_generation_ || !this->pending_ || !this->waiting_for_data_request_) return;
+          this->waiting_for_data_request_ = false;
+          if (this->link_.needs_reset() || this->link_.awaiting_ack()) return;
+          this->send_link_request_();
+        });
       }
       continue;
     }
@@ -145,7 +157,7 @@ void QalcosonicE3::loop() {
   }
   // Process already-buffered UART data before declaring a request timed out.
   // Unsigned subtraction remains correct across millis() wraparound.
-  if (this->pending_ && millis() - this->requested_at_ >= 2000) {
+  if (this->pending_ && !this->waiting_for_data_request_ && millis() - this->requested_at_ >= 2000) {
     this->log_uart_trace_();
     const bool awaiting_ack = this->link_.awaiting_ack();
     this->link_.timeout();

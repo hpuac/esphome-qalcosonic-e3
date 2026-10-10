@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -30,15 +31,30 @@ class Component {
   virtual void loop() {}
   virtual void dump_config() {}
   virtual float get_setup_priority() const { return 0; }
-  void set_timeout(const char *, uint32_t, std::function<void()> callback) { timeout = callback; }
-  void run_timeout() {
-    auto callback = timeout;
-    timeout = {};
+  void set_timeout(const char *name, uint32_t delay, std::function<void()> callback) {
+    this->timeouts_[name] = {test::now, delay, callback};
+  }
+  bool cancel_timeout(const char *name) { return this->timeouts_.erase(name) != 0; }
+  std::function<void()> timeout_callback(const char *name) const { return this->timeouts_.at(name).callback; }
+  void run_timeout(const char *name = "first_read") {
+    auto callback = this->timeouts_.at(name).callback;
+    this->timeouts_.erase(name);
     callback();
+  }
+  void run_scheduler() {
+    std::vector<std::string> due;
+    for (const auto &item : this->timeouts_) {
+      if (test::now - item.second.started_at >= item.second.delay) due.push_back(item.first);
+    }
+    for (const auto &name : due) this->run_timeout(name.c_str());
   }
 
  private:
-  std::function<void()> timeout;
+  struct Timeout {
+    uint32_t started_at, delay;
+    std::function<void()> callback;
+  };
+  std::map<std::string, Timeout> timeouts_;
 };
 class PollingComponent : public Component {
  public:

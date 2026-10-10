@@ -15,6 +15,14 @@ enum class Mode { EXPLICIT_FE, AUTO, TARGETED, MANUAL_EXPLICIT, MANUAL_AUTO };
 class TestComponent : public QalcosonicE3 {
  public:
   bool pending() const { return this->pending_; }
+  bool waiting_for_data_request() const { return this->waiting_for_data_request_; }
+  void abort_readout() {
+    this->pending_ = false;
+    this->waiting_for_data_request_ = false;
+    this->manual_discovery_ = false;
+    this->link_.reset();
+    this->cancel_timeout("post_ack_request");
+  }
   uint32_t failures() const { return this->consecutive_failures_; }
   const LinkState &link() const { return this->link_; }
   size_t buffered() const { return this->receiver_.size(); }
@@ -54,7 +62,24 @@ struct Readout {
   void ack() {
     device.rx.push_back(0xE5);
     device.loop();
+    assert(device.tx.size() == 1 && device.pending());
+    assert(device.waiting_for_data_request());
+    unchanged_diagnostics();
+    device.read_now();
+    device.set_automatic_readout_enabled(true);
+    device.update();
+    device.set_automatic_readout_enabled(false);
+    assert(device.tx.size() == 1);
+    test::now += 99;
+    device.run_scheduler();
+    device.loop();
+    assert(device.tx.size() == 1 && device.pending());
+    unchanged_diagnostics();
+    ++test::now;
+    device.run_scheduler();
     assert(device.tx.size() == 2 && device.tx.back()[1] == 0x7B);
+    assert(device.pending() && !device.waiting_for_data_request());
+    unchanged_diagnostics();
   }
   void timeout() {
     test::now += 2000;
@@ -89,6 +114,65 @@ int main(int argc, char **argv) {
   assert(frame.size() == 99);
   for (Transport transport : {Transport::OPTICAL, Transport::WIRED}) {
     for (Mode mode : {Mode::EXPLICIT_FE, Mode::AUTO, Mode::TARGETED, Mode::MANUAL_EXPLICIT, Mode::MANUAL_AUTO}) {
+      // A late ACK and a delayed scheduler must not consume the data timeout.
+      Readout delayed(transport, mode);
+      test::now += 1900;
+      delayed.device.rx.push_back(0xE5);
+      delayed.device.loop();
+      assert(delayed.device.pending() && delayed.device.tx.size() == 1);
+      const auto old_callback = delayed.device.timeout_callback("post_ack_request");
+      delayed.receive(frame);  // Unsolicited data before REQ_UD2 cannot finish the readout.
+      assert(delayed.device.pending() && delayed.device.tx.size() == 1);
+      delayed.unchanged_diagnostics();
+      test::now += 5000;
+      delayed.device.loop();  // Scheduler has not run yet: no data request, no timeout.
+      assert(delayed.device.pending() && delayed.device.tx.size() == 1);
+      delayed.unchanged_diagnostics();
+      delayed.device.run_scheduler();
+      const auto delayed_request = delayed.device.tx.back();
+      assert(delayed.device.tx.size() == 2 && delayed_request[1] == 0x7B);
+      test::now += 1999;
+      delayed.device.loop();
+      assert(delayed.device.tx.size() == 2 && delayed.device.pending());
+      delayed.unchanged_diagnostics();
+      ++test::now;
+      delayed.device.loop();
+      assert(delayed.device.tx.size() == 3 && delayed.device.tx.back() == delayed_request);
+      delayed.unchanged_diagnostics();  // Retry remains immediate, without another timer.
+      delayed.receive(frame);
+      assert(!delayed.device.pending());
+      old_callback();  // A duplicated callback cannot send after completion.
+      assert(delayed.device.tx.size() == 3);
+
+      // Cancelled/stale callbacks cannot enter an aborted or newer readout.
+      Readout restarted(transport, mode);
+      restarted.device.rx.push_back(0xE5);
+      restarted.device.loop();
+      const auto stale_callback = restarted.device.timeout_callback("post_ack_request");
+      restarted.device.abort_readout();
+      stale_callback();
+      assert(restarted.device.tx.size() == 1);
+      restarted.device.read_now();
+      assert(restarted.device.tx.size() == 2 && restarted.device.tx.back()[1] == 0x40);
+      restarted.device.rx.push_back(0xE5);
+      restarted.device.loop();
+      stale_callback();  // New readout is pending and waiting, but generation differs.
+      assert(restarted.device.pending() && restarted.device.tx.size() == 2);
+      test::now += 100;
+      restarted.device.run_scheduler();
+      assert(restarted.device.tx.size() == 3 && restarted.device.tx.back()[1] == 0x7B);
+      stale_callback();
+      assert(restarted.device.tx.size() == 3);
+
+      Readout reset(transport, mode);
+      reset.device.rx.push_back(0xE5);
+      reset.device.loop();
+      reset.device.set_address(0x2C);  // Reset link before the scheduled request fires.
+      test::now += 100;
+      reset.device.run_scheduler();
+      assert(reset.device.tx.size() == 1);
+      reset.unchanged_diagnostics();
+
       for (unsigned timeouts : {1U, 2U}) {
         Readout readout(transport, mode);
         readout.ack();
@@ -131,6 +215,9 @@ int main(int argc, char **argv) {
             const auto energy_states = readout.energy.states;
             readout.device.rx.push_back(0xE5);
             readout.device.loop();
+            assert(readout.device.waiting_for_data_request());
+            test::now += 100;
+            readout.device.run_scheduler();
             const auto targeted_request = readout.device.tx.back();
             assert(targeted_request[1] == 0x7B && targeted_request[2] == 0x2C);
             readout.timeout();
@@ -180,6 +267,9 @@ int main(int argc, char **argv) {
         // A retry must also preserve an existing failure streak until recovery.
         exhausted.device.rx.push_back(0xE5);
         exhausted.device.loop();
+        assert(exhausted.device.waiting_for_data_request());
+        test::now += 100;
+        exhausted.device.run_scheduler();
         const auto recovery_request = exhausted.device.tx.back();
         exhausted.timeout();
         assert(exhausted.device.pending() && exhausted.device.tx.back() == recovery_request);
