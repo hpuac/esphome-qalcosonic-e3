@@ -20,6 +20,23 @@ int32_t read_i32(const uint8_t *p) {
   const uint32_t value = read_u32(p);
   return static_cast<int32_t>(value <= INT32_MAX ? value : static_cast<int64_t>(value) - 0x100000000LL);
 }
+std::string lcd_error_code(uint32_t status) {
+  // AXIOMA QALCOSONIC E3 Mbus user protocol, 2019.04.10 / Rev2, Table 10:
+  // https://instrumentteam.no/wp-content/uploads/2025/02/QSE3_E4_Mbus_190410.pdf
+  // Index = bit number in the little-endian status; zero = no LCD indication.
+  static constexpr uint16_t LCD_CODES[32] = {
+      0,      0,      0x8000, 0x8000, 0x1000, 0x0008, 0,      0,      0,      0,      0x0001,
+      0x0002, 0,      0,      0,      0,      0x0080, 0x0080, 0x00C0, 0x0080, 0x0800, 0x0800,
+      0x0C00, 0x0800, 0x0880, 0,      0x4000, 0x2000, 0x0004, 0x8000, 0,      0x8000,
+  };
+  uint16_t code = 0;
+  for (unsigned bit = 0; bit < 32; ++bit) {
+    if (status & (uint32_t{1} << bit)) code |= LCD_CODES[bit];
+  }
+  char text[5];
+  std::snprintf(text, sizeof(text), "%04X", static_cast<unsigned>(code));
+  return text;
+}
 size_t record_data_size(uint8_t dif) {
   switch (dif & 0x0F) {
     case 0x00:
@@ -142,8 +159,9 @@ FrameResult parse_frame(const uint8_t *data, size_t size, MeterData &result) {
   const uint8_t *p;
   if ((p = find({0x04, 0x6D}, 4))) decoded.meter_datetime.set(datetime(p));
   if ((p = find({0x34, 0xFD, 0x17}, 4))) {
-    decoded.error_code.set(read_u32(p));
-    if (decoded.error_code.value == 0)
+    decoded.raw_error_status.set(read_u32(p));
+    decoded.error_code.set(lcd_error_code(decoded.raw_error_status.value));
+    if (decoded.raw_error_status.value == 0)
       decoded.error_start.set("No error");
     else if ((p = find({0x34, 0x6D}, 4)))
       decoded.error_start.set(datetime(p));

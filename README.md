@@ -355,7 +355,7 @@ The component only reads meter data; it does not change meter settings.
 | `flow_temperature`             | Sensor        | °C   | Enabled  | Normal     |
 | `return_temperature`           | Sensor        | °C   | Enabled  | Normal     |
 | `temperature_difference`       | Sensor        | K    | Enabled  | Normal     |
-| `error_code`                   | Sensor        | —    | Disabled | Diagnostic |
+| `error_code`                   | Text sensor   | —    | Disabled | Diagnostic |
 | `battery_operating_duration`   | Sensor        | d    | Disabled | Diagnostic |
 | `operating_time_without_error` | Sensor        | d    | Disabled | Diagnostic |
 | `protocol_version`             | Sensor        | —    | Disabled | Diagnostic |
@@ -372,8 +372,13 @@ The component only reads meter data; it does not change meter settings.
 Battery operating duration is **elapsed operating time**, not percentage or
 remaining battery life.
 
+The E3 error field is a bit/status field. `error_code` exposes the meter-style
+LCD code as text: `0000` for no LCD error, or codes such as `4000`, `00C0`,
+`0C00`, and `0880`. Leading zeroes are preserved. The full raw status is retained
+internally; flags without an LCD indication do not contribute to the text code.
+
 Meter error code and error start describe the meter itself. Error start is
-`No error` when the error code is zero; otherwise dates use `YYYY-MM-DD HH:MM`,
+`No error` when the raw error status is zero; otherwise dates use `YYYY-MM-DD HH:MM`,
 without timezone conversion. Missing records leave existing states unchanged.
 
 `readout_successful` reports whether the last read succeeded and stays unknown

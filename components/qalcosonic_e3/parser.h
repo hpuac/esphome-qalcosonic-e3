@@ -24,8 +24,9 @@ struct MeterData {
   std::string serial_number;
   std::string manufacturer;
   uint8_t protocol_version{0};
-  Value<std::string> meter_datetime, error_start;
-  Value<uint32_t> error_code;
+  Value<std::string> meter_datetime, error_start, error_code;
+  // Full M-Bus status, including flags with no LCD equivalent.
+  Value<uint32_t> raw_error_status;
   Value<float> battery_operating_duration, operating_time_without_error;
   Value<float> energy, volume, power, flow, flow_temperature, return_temperature, temperature_difference;
 };

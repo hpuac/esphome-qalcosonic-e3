@@ -196,10 +196,9 @@ void QalcosonicE3::loop() {
 }
 
 void QalcosonicE3::invalidate_measurements_() {
-  for (auto *entity :
-       {this->energy_, this->volume_, this->power_, this->flow_, this->flow_temperature_, this->return_temperature_,
-        this->temperature_difference_, this->error_code_, this->battery_operating_duration_,
-        this->operating_time_without_error_, this->protocol_version_}) {
+  for (auto *entity : {this->energy_, this->volume_, this->power_, this->flow_, this->flow_temperature_,
+                       this->return_temperature_, this->temperature_difference_, this->battery_operating_duration_,
+                       this->operating_time_without_error_, this->protocol_version_}) {
     if (entity != nullptr) entity->publish_state(std::numeric_limits<float>::quiet_NaN());
   }
 }
@@ -246,7 +245,7 @@ void QalcosonicE3::dump_config() {
   LOG_SENSOR("  ", "Flow Temperature", this->flow_temperature_);
   LOG_SENSOR("  ", "Return Temperature", this->return_temperature_);
   LOG_SENSOR("  ", "Temperature Difference", this->temperature_difference_);
-  LOG_SENSOR("  ", "Error Code", this->error_code_);
+  LOG_TEXT_SENSOR("  ", "Error Code", this->error_code_);
   LOG_SENSOR("  ", "Battery Operating Duration", this->battery_operating_duration_);
   LOG_SENSOR("  ", "Operating Time Without Error", this->operating_time_without_error_);
   LOG_SENSOR("  ", "Protocol Version", this->protocol_version_);

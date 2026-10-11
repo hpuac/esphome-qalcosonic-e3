@@ -35,7 +35,7 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   void set_flow_temperature(sensor::Sensor *entity) { this->flow_temperature_ = entity; }
   void set_return_temperature(sensor::Sensor *entity) { this->return_temperature_ = entity; }
   void set_temperature_difference(sensor::Sensor *entity) { this->temperature_difference_ = entity; }
-  void set_error_code(sensor::Sensor *entity) { this->error_code_ = entity; }
+  void set_error_code(text_sensor::TextSensor *entity) { this->error_code_ = entity; }
   void set_battery_operating_duration(sensor::Sensor *entity) { this->battery_operating_duration_ = entity; }
   void set_operating_time_without_error(sensor::Sensor *entity) { this->operating_time_without_error_ = entity; }
   void set_protocol_version(sensor::Sensor *entity) { this->protocol_version_ = entity; }
@@ -77,7 +77,7 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor *flow_temperature_{nullptr};
   sensor::Sensor *return_temperature_{nullptr};
   sensor::Sensor *temperature_difference_{nullptr};
-  sensor::Sensor *error_code_{nullptr};
+  text_sensor::TextSensor *error_code_{nullptr};
   sensor::Sensor *battery_operating_duration_{nullptr};
   sensor::Sensor *operating_time_without_error_{nullptr};
   sensor::Sensor *protocol_version_{nullptr};

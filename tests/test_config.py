@@ -45,6 +45,16 @@ assert validated["readout_successful"]["device_class"] == "connectivity"
 assert validated["automatic_readout"]["restore_mode"] == "ALWAYS_ON"
 assert validated["automatic_readout"]["entity_category"] == "config"
 assert validated["unavailable_after_failures"] == 5
+assert validated["error_code"]["disabled_by_default"] is True
+assert validated["error_code"]["entity_category"] == "diagnostic"
+assert "accuracy_decimals" not in validated["error_code"]
+# Common entity options remain valid; numeric sensor options require migration.
+config["qalcosonic_e3"]["error_code"]["disabled_by_default"] = False
+config["qalcosonic_e3"]["error_code"]["id"] = "lcd_error"
+assert validate(config)["qalcosonic_e3"][0]["error_code"]["disabled_by_default"] is False
+config["qalcosonic_e3"]["error_code"]["accuracy_decimals"] = 0
+validate(config, False)
+del config["qalcosonic_e3"]["error_code"]["accuracy_decimals"]
 config["qalcosonic_e3"] = {"uart_id": "mbus_uart", "transport": "optical"}
 validate(config, False)  # The interface's address must be configured explicitly.
 config["qalcosonic_e3"]["address"] = 0x01
