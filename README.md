@@ -374,8 +374,7 @@ remaining battery life.
 
 The E3 error field is a bit/status field. `error_code` exposes the meter-style
 LCD code as text: `0000` for no LCD error, or codes such as `4000`, `00C0`,
-`0C00`, and `0880`. Leading zeroes are preserved, and Home Assistant no longer
-shows raw bitfield values such as `67108864.0`. The full raw status is retained
+`0C00`, and `0880`. Leading zeroes are preserved. The full raw status is retained
 internally; flags without an LCD indication do not contribute to the text code.
 
 Migration: the documented `error_code:` block with `name` and common entity
