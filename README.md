@@ -27,7 +27,7 @@ and receiving, with logic levels compatible with the board. Communication uses
 ## Installation and configuration
 
 The following configuration enables the main measurements, readout
-status, and manual read button:
+status, automatic readout switch, and manual read button:
 
 ```yaml
 esphome:
@@ -76,18 +76,18 @@ qalcosonic_e3:
   update_interval: 2min
   energy:
     name: "Energy"
-  volume:
-    name: "Volume"
-  power:
-    name: "Power"
   flow:
     name: "Flow"
   flow_temperature:
     name: "Flow Temperature"
+  power:
+    name: "Power"
   return_temperature:
     name: "Return Temperature"
   temperature_difference:
     name: "Temperature Difference"
+  volume:
+    name: "Volume"
   readout_successful:
     name: "Readout Successful"
   automatic_readout:
@@ -100,53 +100,36 @@ Add your Wi-Fi credentials and API encryption key to `secrets.yaml`, and adjust
 the board and GPIO pins for your hardware.
 
 [The full example](examples/esp32-c6.yaml) includes every optional entity.
-Each nested entity can be omitted, renamed, or configured with normal ESPHome
-entity options (including `id`, filters for numeric sensors, and
-`disabled_by_default: false`). Omitted entities are not created; the defaults
-below apply when an entity is configured. Diagnostic entities are disabled in Home Assistant by default, except for
-`readout_successful`. Enable them in Home Assistant or override the default:
+Each nested entity is optional and supports normal ESPHome entity options,
+such as `id`, numeric sensor filters, and `disabled_by_default`. Omitted entities
+are not created. Configured diagnostic entities are disabled in Home Assistant
+by default, except for `readout_successful`. Enable them in Home Assistant or set
+`disabled_by_default: false` on the entity.
 
-```yaml
-qalcosonic_e3:
-  uart_id: mbus_uart
-  transport: optical
-  address: 0x01
-  error_code:
-    name: "Error Code"
-    disabled_by_default: false
-```
+The component requires both UART pins and validates **2400 baud, 8E1**.
+Use a dedicated UART; a 512-byte RX buffer is recommended.
 
-The component requires both UART pins and validates 2400 baud, 8 data bits,
-even parity, and 1 stop bit. Use a dedicated UART with a 512-byte RX buffer.
+### Component options
+
+| Option                       | Required | Default | Values / behavior                                                                                 |
+| ---------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `transport`                  | Yes      | —       | `optical` or `wired`                                                                              |
+| `address`                    | Yes      | —       | `auto`, `0x00`–`0xFA`, or `0xFE`; see below                                                       |
+| `update_interval`            | No       | `2min`  | Polling interval for either transport                                                             |
+| `unavailable_after_failures` | No       | `0`     | Consecutive failed reads before numeric meter sensors become unknown; `0` keeps their last values |
 
 ## M-Bus primary address
 
-`transport` is **required** and accepts exactly `optical` or `wired`. Both use
-one shared parser. `address` is also **required**, with no default, and accepts
-`auto` or a supported numeric address. Configure the primary address for
-the interface you use: optical and wired interfaces may have different primary
-addresses even on the same physical meter. On the tested meter, optical used
-`0x01` and wired M-Bus used `0x2C` (decimal 44).
+Configure the primary address for the interface you use: optical and wired
+interfaces may have different addresses even on the same meter. On the tested
+meter, optical used `0x01` and wired M-Bus used `0x2C` (decimal 44).
 
-Supported normal primary addresses are `0x00`–`0xFA`; `0xFE` is also supported as
-a **test/point-to-point address**. Hexadecimal notation is supported.
-`0xFB`, `0xFC`, `0xFD`, and `0xFF` are not supported. Secondary addressing/selection
-with `0xFD` is not implemented. Broadcast address `0xFF` expects no response and
-is incompatible with this component's request/response behavior.
-
-Optical example (`0x01` was the tested meter's optical address):
-
-```yaml
-qalcosonic_e3:
-  uart_id: mbus_uart
-  transport: optical
-  address: 0x01
-  update_interval: 2min
-```
+Supported numeric addresses are `0x00`–`0xFA` and the test/point-to-point address
+`0xFE`. Hexadecimal notation is supported. Secondary-address selection and
+multi-slave scanning are not implemented; `0xFB`–`0xFD` and `0xFF` are rejected.
 
 **Auto discovery, manual discovery, and explicit `0xFE` operation require exactly
-one connected M-Bus slave.** With multiple slaves, responses may collide. This
-component does not implement multi-slave scanning or secondary-address selection.
+one connected M-Bus slave.** With multiple slaves, responses may collide.
 
 Recommended wired point-to-point setup:
 
@@ -158,44 +141,13 @@ qalcosonic_e3:
   update_interval: 15min
 ```
 
-Auto mode sends SND_NKE and REQ_UD2 to `0xFE`, logs the discovered primary
-address, and uses that address for following normal reads. The first targeted
-read initializes a fresh link session at the discovered address. The discovered
-address is kept in RAM only; discovery runs again after reboot. A failed initial
-discovery retries `0xFE`, without assuming an address such as `0x01`.
-Auto discovery is valid for both optical and wired transports. It has been
-verified on wired M-Bus so far.
-
-Known wired address (`0x2C`, decimal 44, was the same meter's wired address):
-
-```yaml
-qalcosonic_e3:
-  uart_id: mbus_uart
-  transport: wired
-  address: 0x2C
-  update_interval: 15min
-```
-
-Explicit test/point-to-point operation:
-
-```yaml
-qalcosonic_e3:
-  uart_id: mbus_uart
-  transport: wired
-  address: 0xFE
-```
-
-Every connected slave recognizes the test/point-to-point address `0xFE` and
-responds using its real primary address, which is logged for discovery.
-All requests to `0xFE`, including auto and manual discovery, accept only normal
-primary response addresses `0x00`–`0xFA`; responses with `0xFB`–`0xFF` are ignored.
-For normal targeted requests, responses from addresses other than the active
-address are ignored; the component keeps waiting for a matching response until timeout.
-On the tested wired interface, `10 40 FE 3E 16` (SND_NKE) received `E5`, and
-`10 5B FE 59 16` (REQ_UD2) received a valid frame with response address `0x2C`.
-Requests are generated from the active request address, with checksum
-`(control + address) & 0xFF`. REQ_UD2 retains the existing alternating frame count
-bit (`0x7B` / `0x5B`) and retry behavior.
+- `address: auto` discovers the primary address via `0xFE`, logs it, and uses it
+  for subsequent reads. It is kept in RAM only; discovery runs again after
+  reboot. Failed initial discovery is retried on the next read. Auto discovery
+  supports both transports and has been verified on wired M-Bus so far.
+- A known numeric address, such as `address: 0x2C`, is used directly.
+- `address: 0xFE` keeps using the test/point-to-point address for every read and
+  logs the meter's primary response address.
 
 ### Manual address discovery
 
@@ -212,8 +164,8 @@ qalcosonic_e3:
 The optional button starts discovery via `0xFE` and logs the result. In auto mode
 it updates the runtime address; with a numeric address it only reports the
 result and keeps using the configured address. Discovery does not persist to
-flash or publish measurements. A failed manual discovery keeps the previous
-active address; unresolved auto mode continues discovery on the next read.
+flash, publish measurements, or change readout diagnostics and the failure count.
+A failed manual discovery keeps the previous active address; unresolved auto mode continues discovery on the next read.
 Presses during startup or an active read are ignored with a warning. The button
 also works when automatic readout is disabled.
 
@@ -226,46 +178,22 @@ also works when automatic readout is disabled.
 | GPIO2 (RX) | TX → ESP RX      |
 | GPIO3 (TX) | RX ← ESP TX      |
 
-Pins are configurable. This is M-Bus, **not SML**. The component reads optical M-Bus through a
-TTL head. The wired M-Bus interface uses the same high-level
-telegram format but needs a proper M-Bus master/transceiver; never connect the
-meter's M-Bus wires directly to ESP GPIO.
+Pins are configurable. The optical head must support M-Bus, **not SML**.
 
 ## Wired M-Bus hardware
 
 The tested **Zihatec M-BUS Master Module** worked with an ESP32-C6 and a single
 QALCOSONIC E3. See the [product/project page](https://www.hwhardsoft.de/2024/10/08/m-bus-master-breakout/).
-The exact small module tested has three connector groups:
 
-| Group                     | Connector labels                        |
-| ------------------------- | --------------------------------------- |
-| Power / M-Bus-side supply | `MGND`, `5-24V`                         |
-| M-Bus                     | `MBUS+`, `MBUS-`                        |
-| Digital side              | `3.3-5VDC`, `MBUS RX`, `MBUS TX`, `GND` |
-
-Tested digital wiring:
-
-| ESP32        | Zihatec module |
-| ------------ | -------------- |
-| 3.3 V        | `3.3-5VDC`     |
-| GND          | Digital `GND`  |
-| RX (GPIO2) ← | `MBUS RX`      |
-| TX (GPIO3) → | `MBUS TX`      |
-
-**For this module, RX connects to RX and TX connects to TX.**
-`ESP RX GPIO2 ← Zihatec MBUS RX`; `ESP TX GPIO3 → Zihatec MBUS TX`.
-`MBUS RX` is the isolated data **output** from the module toward the controller;
-`MBUS TX` is the isolated data **input** from the controller.
+**For this module, RX connects to RX and TX connects to TX.** `MBUS RX` is the
+module's data output toward ESP RX; `MBUS TX` is its data input from ESP TX.
 Do not cross these signals as you might with conventional UART labels.
 
-Connect the meter's M-Bus pair to `MBUS+` / `MBUS-`. The tested meter's M-Bus
-connection is non-polarized, so either meter M-Bus wire can go to either terminal.
-**Do not connect the meter's M-Bus wires directly to ESP GPIO pins.** A proper
-M-Bus master/transceiver is required.
+Connect the meter's pair to `MBUS+` / `MBUS-`. The tested meter's M-Bus connection
+is non-polarized, so either wire can go to either terminal.
+**Never connect the meter's M-Bus wires directly to ESP GPIO pins.**
 
 ### Recommended wiring: Shared ESP supply, no galvanic isolation
-
-This wiring uses the **exact Zihatec M-BUS Master Module linked above**:
 
 ```text
 ESP32-C6                    Zihatec M-BUS Master             QALCOSONIC E3
@@ -286,11 +214,6 @@ supply is required for that tested setup. Digital GND and MGND are common throug
 the ESP supply, so **galvanic isolation is lost**. Other ESP boards may have
 weaker 5 V rails; sufficient voltage/current is not universally guaranteed.
 
-`ESP RX GPIO2 ← Zihatec MBUS RX`; `ESP TX GPIO3 → Zihatec MBUS TX`.
-For this specific module **RX connects to RX and TX connects to TX**.
-The tested meter's pair is non-polarized: either wire can connect to `MBUS+` or
-`MBUS-`. Never connect those wires directly to ESP GPIO.
-
 If isolation is desired or the board's 5 V rail is insufficient, a separate
 suitable 5–24 V supply is an optional alternative. A 9 V external supply was
 successfully tested and produced approximately 36 V across `MBUS+` / `MBUS-`
@@ -308,66 +231,59 @@ To preserve galvanic isolation, **do not connect MGND or external supply GND to
 ESP digital GND**. In this alternative, the ESP 5 V rail is not connected to the
 module's `5-24V` input.
 
-## Optical interface and polling
+## Polling and readout control
 
-On the tested QALCOSONIC E3, the optical interface became inactive after approximately **5 minutes without
-communication**. After it sleeps, it requires local activation at the meter before communication resumes.
-The **2-minute** polling interval was used successfully for a long period. It
-was chosen deliberately to leave margin for failed reads while keeping the
-interface available. Use an
-interval below the inactivity timeout for continuous availability. Battery-current
-consumption has not been measured, so no battery-life impact is quantified.
-The optical interface is normally allowed to deactivate after inactivity;
-continuous polling below that timeout keeps it active.
+On the tested QALCOSONIC E3, the optical interface became inactive after about
+**5 minutes without communication** and required local activation at the meter
+to resume. A **2-minute** interval worked successfully for a long period and
+leaves margin for failed reads. Keep the interval below the inactivity timeout
+for continuous optical availability. Battery-current consumption has not been
+measured, so the impact on battery life is unknown.
 
-The optical interface was used successfully during development, but on the
-tested installation it later became unreliable despite previously working.
-No root cause was established, and this does not imply that all QALCOSONIC E3
-optical interfaces will fail. For permanent installations, wired M-Bus is
-therefore recommended when accessible.
+The tested optical installation later became unreliable; no root cause was
+established. This observation does not establish a general failure of E3 optical
+interfaces.
 
-With `transport: optical`, about five minutes without link activity resets the
-link so the next read starts with SND_NKE. With `transport: wired`, no optical-style
-five-minute timeout is applied: polling intervals such as 15 minutes or one hour
-do not force link resets. Choose the wired polling interval for your use case;
-the global default remains two minutes. 15 minutes is used as an example for
-wired installations. Choose the interval according to your use case; shorter
-and longer intervals are supported without an optical-style inactivity constraint.
-Both transports start the first read after boot with SND_NKE and resynchronize
-after failed communication. Alternating FCB and retry behavior are preserved.
+With `transport: optical`, five minutes without link activity causes the next
+read to reinitialize the link with SND_NKE. Wired mode has no such inactivity
+reset; choose its polling interval for your use case. The default is **2 minutes
+for both transports**; 15 minutes is only the wired example's choice.
+Both transports initialize the link on their first read and resynchronize after
+failed communication.
 
 With automatic readout enabled, the first reading starts about 10 seconds after
 startup. Use `update_interval` to change the polling interval. Configure
 `automatic_readout` to expose a switch that pauses scheduled reads when off.
 The switch starts on after a reboot by default. Turning it back on restarts
 the polling interval. `read_now` still requests a reading while automatic
-readout is off. A read already in progress finishes when the switch is turned off.
+readout is off. Requests during startup or an active read are ignored rather
+than queued. A read already in progress finishes when the switch is turned off.
 The component only reads meter data; it does not change meter settings.
 
 ## Entities
 
-| Entity key                     | Type          | Unit | Default  | Category   |
-| ------------------------------ | ------------- | ---- | -------- | ---------- |
-| `energy`                       | Sensor        | MWh  | Enabled  | Normal     |
-| `volume`                       | Sensor        | m³   | Enabled  | Normal     |
-| `power`                        | Sensor        | kW   | Enabled  | Normal     |
-| `flow`                         | Sensor        | m³/h | Enabled  | Normal     |
-| `flow_temperature`             | Sensor        | °C   | Enabled  | Normal     |
-| `return_temperature`           | Sensor        | °C   | Enabled  | Normal     |
-| `temperature_difference`       | Sensor        | K    | Enabled  | Normal     |
-| `error_code`                   | Text sensor   | —    | Disabled | Diagnostic |
-| `battery_operating_duration`   | Sensor        | d    | Disabled | Diagnostic |
-| `operating_time_without_error` | Sensor        | d    | Disabled | Diagnostic |
-| `protocol_version`             | Sensor        | —    | Disabled | Diagnostic |
-| `meter_datetime`               | Text sensor   | —    | Disabled | Diagnostic |
-| `error_start`                  | Text sensor   | —    | Disabled | Diagnostic |
-| `serial_number`                | Text sensor   | —    | Disabled | Diagnostic |
-| `manufacturer`                 | Text sensor   | —    | Disabled | Diagnostic |
-| `readout_successful`           | Binary sensor | —    | Enabled  | Diagnostic |
-| `readout_failures`             | Sensor        | —    | Disabled | Diagnostic |
-| `automatic_readout`            | Switch        | —    | Enabled  | Config     |
-| `discover_address`             | Button        | —    | Enabled  | Config     |
-| `read_now`                     | Button        | —    | Enabled  | Config     |
+| Entity key                     | Type          | Unit | Enabled by default | Category   |
+| ------------------------------ | ------------- | ---- | ------------------ | ---------- |
+| `energy`                       | Sensor        | MWh  | Enabled            | Normal     |
+| `flow`                         | Sensor        | m³/h | Enabled            | Normal     |
+| `flow_temperature`             | Sensor        | °C   | Enabled            | Normal     |
+| `power`                        | Sensor        | kW   | Enabled            | Normal     |
+| `return_temperature`           | Sensor        | °C   | Enabled            | Normal     |
+| `temperature_difference`       | Sensor        | K    | Enabled            | Normal     |
+| `volume`                       | Sensor        | m³   | Enabled            | Normal     |
+| `battery_operating_duration`   | Sensor        | d    | Disabled           | Diagnostic |
+| `error_code`                   | Text sensor   | —    | Disabled           | Diagnostic |
+| `error_start`                  | Text sensor   | —    | Disabled           | Diagnostic |
+| `manufacturer`                 | Text sensor   | —    | Disabled           | Diagnostic |
+| `meter_datetime`               | Text sensor   | —    | Disabled           | Diagnostic |
+| `operating_time_without_error` | Sensor        | d    | Disabled           | Diagnostic |
+| `protocol_version`             | Sensor        | —    | Disabled           | Diagnostic |
+| `readout_failures`             | Sensor        | —    | Disabled           | Diagnostic |
+| `readout_successful`           | Binary sensor | —    | Enabled            | Diagnostic |
+| `serial_number`                | Text sensor   | —    | Disabled           | Diagnostic |
+| `automatic_readout`            | Switch        | —    | Enabled            | Config     |
+| `discover_address`             | Button        | —    | Enabled            | Config     |
+| `read_now`                     | Button        | —    | Enabled            | Config     |
 
 Battery operating duration is **elapsed operating time**, not percentage or
 remaining battery life.
@@ -382,23 +298,16 @@ Meter error code and error start describe the meter itself. Error start is
 without timezone conversion. Missing records leave existing states unchanged.
 
 `readout_successful` reports whether the last read succeeded and stays unknown
-until the first result. A read times out after 2 seconds. `readout_failures`
-counts consecutive failed reads since the last successful read and resets to
-zero after a successful read or when the ESP restarts.
+until the first result. Each data request has a **2-second timeout** and is
+attempted up to **three times**. Only exhaustion counts as one failed readout;
+a missing link-initialization acknowledgement ends the readout after 2 seconds.
+`readout_failures` counts consecutive failed readouts and resets to zero after a
+successful read or when the ESP restarts.
 
 `unavailable_after_failures` sets the number of consecutive failed reads before
 numeric meter sensors publish `NaN` (shown as **unknown** in Home Assistant).
 They publish `NaN` once per failure streak, when the threshold is reached.
 The default `0` keeps the last measurements.
-
-```yaml
-qalcosonic_e3:
-  uart_id: mbus_uart
-  transport: optical
-  address: 0x01
-  update_interval: 2min
-  unavailable_after_failures: 5
-```
 
 A successful read resets the failure streak and updates received values.
 Text sensors retain their values; sensor filters can suppress or replace `NaN`.
