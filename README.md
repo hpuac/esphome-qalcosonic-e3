@@ -377,12 +377,6 @@ LCD code as text: `0000` for no LCD error, or codes such as `4000`, `00C0`,
 `0C00`, and `0880`. Leading zeroes are preserved. The full raw status is retained
 internally; flags without an LCD indication do not contribute to the text code.
 
-Migration: the documented `error_code:` block with `name` and common entity
-options still works. This entity is now a text sensor; remove numeric options
-such as `accuracy_decimals`, units, state class, and numeric filters. Update
-Home Assistant automations to compare string codes and remove any obsolete
-numeric entity from the entity registry if needed.
-
 Meter error code and error start describe the meter itself. Error start is
 `No error` when the raw error status is zero; otherwise dates use `YYYY-MM-DD HH:MM`,
 without timezone conversion. Missing records leave existing states unchanged.
