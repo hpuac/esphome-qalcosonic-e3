@@ -81,20 +81,25 @@ class RecordReader {
  public:
   RecordReader(const uint8_t *data, size_t end) : data_(data), end_(end) {}
 
-  // Preserve partial decoding: truncation or an unsupported LVAR ends traversal.
+  // false ends traversal, whether exhausted, manufacturer-specific, truncated, or unsupported.
+  // Records already decoded remain available to the caller.
   bool next(Record &record) {
     while (this->position_ < this->end_) {
       const size_t start = this->position_;
       const uint8_t dif = this->data_[this->position_++];
       if (dif == 0x2F) continue;               // Idle filler.
       if ((dif & 0x0F) == 0x0F) return false;  // Manufacturer-specific data.
-      if (!this->skip_extensions_(dif)) return false;
-      if (this->position_ >= this->end_) return false;
+
+      // An incomplete DIF extension chain or a missing VIF ends this record.
+      if (!this->skip_extensions_(dif) || this->position_ >= this->end_) return false;
       const uint8_t vif = this->data_[this->position_++];
       if (!this->skip_extensions_(vif)) return false;
+
+      // A missing/unsupported LVAR or a truncated value also ends traversal.
       size_t data_size = record_data_size(dif);
       if ((dif & 0x0F) == 0x0D && !this->read_variable_size_(data_size)) return false;
       if (data_size > this->end_ - this->position_) return false;
+
       record = {this->data_ + start, this->position_ - start, this->data_ + this->position_, data_size};
       this->position_ += data_size;
       return true;

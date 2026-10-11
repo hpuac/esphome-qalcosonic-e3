@@ -14,6 +14,7 @@ namespace {
 constexpr uint32_t STARTUP_DELAY_MS = 10000;
 constexpr uint32_t POST_ACK_DELAY_MS = 100;
 constexpr uint32_t RESPONSE_TIMEOUT_MS = 2000;
+// Limit UART work per ESPHome loop iteration, independently of the maximum M-Bus frame size.
 constexpr size_t MAX_RX_BYTES_PER_LOOP = 512;
 
 template <typename Entity, typename T>
