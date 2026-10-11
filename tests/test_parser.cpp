@@ -19,7 +19,7 @@ void checksum(std::vector<uint8_t> &frame) {
   frame[frame.size() - 2] = sum;
 }
 int main(int argc, char **argv) {
-  assert(argc == 3);
+  assert(argc == 6);
   std::ifstream input(argv[1]);
   std::vector<uint8_t> frame;
   unsigned byte;
@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
   assert(data.manufacturer == "AXI");
   assert(data.protocol_version == 11);
   assert(data.meter_datetime.present && data.meter_datetime.value == "2026-09-15 16:02");
-  assert(data.error_code.present && data.error_code.value == 0);
+  assert(data.error_code.present && data.error_code.value == "0000");
   assert(data.error_start.present && data.error_start.value == "No error");
   near(data.energy, 0.073f);
   near(data.volume, 3.032f);
@@ -57,14 +57,17 @@ int main(int argc, char **argv) {
   // Signed M-Bus integers can represent reverse flow and sub-zero temperatures.
   bad = frame;
   auto flow = find_pattern(bad, {0x04, 0x3B});
+  auto power = find_pattern(bad, {0x04, 0x2B});
   auto temperature = find_pattern(bad, {0x02, 0x59});
-  assert(flow != bad.end() && temperature != bad.end());
+  assert(flow != bad.end() && power != bad.end() && temperature != bad.end());
   std::fill(flow + 2, flow + 6, 0xFF);
+  std::fill(power + 2, power + 6, 0xFF);
   temperature[2] = 0x9C;
   temperature[3] = 0xFF;
   checksum(bad);
   assert(parse_frame(bad.data(), bad.size(), data) == FrameResult::OK);
   near(data.flow, -0.001f);
+  near(data.power, -0.001f);
   near(data.flow_temperature, -1.0f);
   for (size_t n = 0; n < frame.size(); ++n) assert(parse_frame(frame.data(), n, data) == FrameResult::INCOMPLETE);
   bad = frame;
@@ -84,7 +87,37 @@ int main(int argc, char **argv) {
   bad[34] = 1;
   checksum(bad);
   assert(parse_frame(bad.data(), bad.size(), data) == FrameResult::OK);
-  assert(data.error_code.value == 1 && data.error_start.value == "2000-01-01 00:00");
+  assert(data.raw_error_status.value == 1 && data.error_code.value == "0000" &&
+         data.error_start.value == "2000-01-01 00:00");
+  // Protocol Table 10 examples and simultaneous flags preserve LCD formatting.
+  struct ErrorCase {
+    uint32_t raw;
+    const char *lcd;
+  };
+  for (const auto &test : std::initializer_list<ErrorCase>{
+           {0x00000004, "8000"}, {0x00000008, "8000"}, {0x00000010, "1000"}, {0x00000020, "0008"}, {0x00000400, "0001"},
+           {0x00000800, "0002"}, {0x00010000, "0080"}, {0x00020000, "0080"}, {0x00040000, "00C0"}, {0x00080000, "0080"},
+           {0x00100000, "0800"}, {0x00200000, "0800"}, {0x00400000, "0C00"}, {0x00800000, "0800"}, {0x01000000, "0880"},
+           {0x04000000, "4000"}, {0x08000000, "2000"}, {0x10000000, "0004"}, {0x20000000, "8000"}, {0x80000000, "8000"},
+           {0x04140000, "48C0"}, {0x00001000, "0000"}, {0xFFFFFFFF, "FCCF"}}) {
+    bad = frame;
+    auto status = find_pattern(bad, {0x34, 0xFD, 0x17});
+    assert(status != bad.end());
+    for (unsigned i = 0; i < 4; ++i) status[3 + i] = static_cast<uint8_t>(test.raw >> (8 * i));
+    checksum(bad);
+    assert(parse_frame(bad.data(), bad.size(), data) == FrameResult::OK);
+    assert(data.error_code.present && data.error_code.value == test.lcd);
+    assert(data.raw_error_status.present && data.raw_error_status.value == test.raw);
+    assert(data.error_start.value == "2000-01-01 00:00");
+    // Active status without an error-start record must not invent a timestamp.
+    auto timestamp = find_pattern(bad, {0x34, 0x6D});
+    assert(timestamp != bad.end());
+    bad.erase(timestamp, timestamp + 6);
+    bad[1] = bad[2] = static_cast<uint8_t>(bad.size() - 6);
+    checksum(bad);
+    assert(parse_frame(bad.data(), bad.size(), data) == FrameResult::OK);
+    assert(!data.error_start.present && data.error_code.value == test.lcd);
+  }
   // Header-only responses remain successful, with no invented record values.
   bad.assign(frame.begin(), frame.begin() + 19);
   bad[1] = bad[2] = 15;
@@ -93,6 +126,7 @@ int main(int argc, char **argv) {
   checksum(bad);
   assert(parse_frame(bad.data(), bad.size(), data) == FrameResult::OK);
   assert(!data.energy.present && !data.error_start.present);
+  assert(!data.error_code.present && !data.raw_error_status.present);
   bad = {0x68, 3, 3, 0x68, 8, 1, 0x72, 0x7B, 0x16};
   assert(parse_frame(bad.data(), bad.size(), data) == FrameResult::SHORT_HEADER);
   // An incomplete final record must not read its checksum as value bytes.
@@ -157,7 +191,7 @@ int main(int argc, char **argv) {
   assert(data.response_address == 0x2C);
   assert(data.serial_number == "01234567");
   assert(data.manufacturer == "AXI" && data.protocol_version == 11);
-  assert(data.error_code.present && data.error_code.value == 0);
+  assert(data.error_code.present && data.error_code.value == "0000");
   near(data.energy, 0.260f);
   near(data.volume, 12.793f);
   near(data.power, 0.213f);
@@ -199,6 +233,42 @@ int main(int argc, char **argv) {
       }
     }
     assert(responses == (address == 0xFE ? 2U : 1U));
+  }
+  // Real wired captures: both serial fields anonymized to 01234567,
+  // with the M-Bus checksum recalculated after replacing the BCD serial bytes.
+  struct Capture {
+    float power, flow, flow_temperature, return_temperature, delta_t;
+    const char *code;
+    uint32_t raw;
+  };
+  const Capture captures[] = {
+      {0, 0, 65.22f, 37.75f, 27.46f, "0000", 0},
+      {0, 0, 24.95f, 23.68f, 1.26f, "4000", 0x04000000},
+      {29.266f, 0.726f, 79.51f, 41.44f, 38.06f, "0000", 0},
+  };
+  for (unsigned i = 0; i < 3; ++i) {
+    std::ifstream capture_input(argv[3 + i]);
+    std::vector<uint8_t> capture;
+    while (capture_input >> std::hex >> byte) capture.push_back(static_cast<uint8_t>(byte));
+    assert(capture.size() == 99);
+    const std::array<uint8_t, 4> serial{{0x67, 0x45, 0x23, 0x01}};
+    assert(std::equal(serial.begin(), serial.end(), capture.begin() + 7));
+    assert(std::equal(serial.begin(), serial.end(), capture.begin() + 89));
+    assert(parse_frame(capture.data(), capture.size(), data) == FrameResult::OK);
+    assert(data.response_address == 0x2C && data.serial_number == "01234567");
+    assert(data.manufacturer == "AXI" && data.protocol_version == 11);
+    const auto &expected = captures[i];
+    near(data.power, expected.power);
+    near(data.flow, expected.flow);
+    near(data.flow_temperature, expected.flow_temperature);
+    near(data.return_temperature, expected.return_temperature);
+    near(data.temperature_difference, expected.delta_t);
+    assert(data.error_code.present && data.error_code.value == expected.code);
+    assert(data.raw_error_status.present && data.raw_error_status.value == expected.raw);
+    assert(data.error_start.present);
+    assert(data.error_start.value == (expected.raw == 0 ? "No error" : "2000-01-01 00:00"));
+    expect_clean_frame(capture);
+    assert(data.error_code.value == expected.code);
   }
   std::cout << "Parser and incremental receiver tests passed\n";
 }

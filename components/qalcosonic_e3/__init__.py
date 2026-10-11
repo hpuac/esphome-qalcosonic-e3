@@ -75,13 +75,6 @@ SENSORS = {
         icon="mdi:thermometer-lines",
         state_class="measurement",
     ),
-    "error_code": diagnostic(
-        sensor.sensor_schema(
-            accuracy_decimals=0,
-            icon="mdi:alert-circle-outline",
-            entity_category="diagnostic",
-        )
-    ),
     "battery_operating_duration": diagnostic(
         sensor.sensor_schema(
             accuracy_decimals=1,
@@ -115,6 +108,12 @@ SENSORS = {
     ),
 }
 TEXT_SENSORS = {
+    "error_code": diagnostic(
+        text_sensor.text_sensor_schema(
+            icon="mdi:alert-circle-outline",
+            entity_category="diagnostic",
+        )
+    ),
     "meter_datetime": diagnostic(
         text_sensor.text_sensor_schema(
             entity_category="diagnostic",

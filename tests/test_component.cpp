@@ -106,12 +106,40 @@ std::vector<uint8_t> with_address(std::vector<uint8_t> frame, uint8_t address) {
 }
 
 int main(int argc, char **argv) {
-  assert(argc == 2);
+  assert(argc == 3);
   std::ifstream input(argv[1]);
   std::vector<uint8_t> frame;
   unsigned byte;
   while (input >> std::hex >> byte) frame.push_back(static_cast<uint8_t>(byte));
   assert(frame.size() == 99);
+  // Publish the actual captured active error as text, then clear it on no error.
+  std::ifstream error_input(argv[2]);
+  std::vector<uint8_t> error_frame;
+  while (error_input >> std::hex >> byte) error_frame.push_back(static_cast<uint8_t>(byte));
+  assert(error_frame.size() == 99);
+  {
+    Readout readout(Transport::WIRED, Mode::TARGETED);
+    text_sensor::TextSensor error_code, error_start;
+    readout.device.set_error_code(&error_code);
+    readout.device.set_error_start(&error_start);
+    readout.ack();
+    readout.receive(error_frame);
+    assert(error_code.states == std::vector<std::string>{"4000"});
+    assert(error_start.states == std::vector<std::string>{"2000-01-01 00:00"});
+    readout.device.read_now();
+    readout.device.rx.push_back(0xE5);
+    readout.device.loop();
+    test::now += 100;
+    readout.device.run_scheduler();
+    readout.receive(frame);
+    assert((error_code.states == std::vector<std::string>{"4000", "0000"}));
+    assert((error_start.states == std::vector<std::string>{"2000-01-01 00:00", "No error"}));
+    // A failed readout retains text state, consistent with other text entities.
+    readout.device.read_now();
+    for (unsigned i = 0; i < 4; ++i) readout.timeout();
+    assert(readout.device.failures() == 1 && std::isnan(readout.energy.states.back()));
+    assert(error_code.states.size() == 2 && error_start.states.size() == 2);
+  }
   for (Transport transport : {Transport::OPTICAL, Transport::WIRED}) {
     for (Mode mode : {Mode::EXPLICIT_FE, Mode::AUTO, Mode::TARGETED, Mode::MANUAL_EXPLICIT, Mode::MANUAL_AUTO}) {
       // A late ACK and a delayed scheduler must not consume the data timeout.
