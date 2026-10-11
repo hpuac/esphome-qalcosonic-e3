@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   tests:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - name: Check out repository
@@ -26,9 +26,12 @@ jobs:
         run: ./tests/run.sh
 
       - name: Set up Python
+        id: setup-python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
 
       - name: Install test dependencies
         run: python -m pip install -r requirements-dev.txt
@@ -38,6 +41,17 @@ jobs:
 
       - name: Validate ESP32-C6 configuration
         run: python -m esphome config tests/esp32-c6.yaml
+
+      - name: Expose runner image for cache key
+        run: echo "ImageOS=${ImageOS:?}" >> "$GITHUB_ENV"
+
+      - name: Cache ESPHome ESP-IDF dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/esphome/idf
+          # The IDF cache includes a Python environment tied to this interpreter.
+          key: >-
+            esphome-idf-v1-${{ env.ImageOS }}-${{ runner.arch }}-python-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements-dev.txt', 'tests/esp32-c6.yaml') }}
 
       - name: Compile ESP32-C6 firmware
         run: python -m esphome compile tests/esp32-c6.yaml
