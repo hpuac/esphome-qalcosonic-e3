@@ -19,7 +19,7 @@ void checksum(std::vector<uint8_t> &frame) {
   frame[frame.size() - 2] = sum;
 }
 int main(int argc, char **argv) {
-  assert(argc == 6);
+  assert(argc == 3);
   std::ifstream input(argv[1]);
   std::vector<uint8_t> frame;
   unsigned byte;
@@ -236,18 +236,19 @@ int main(int argc, char **argv) {
   }
   // Real wired captures: both serial fields anonymized to 01234567,
   // with the M-Bus checksum recalculated after replacing the BCD serial bytes.
-  struct Capture {
+  struct CaptureCase {
+    const char *path;
     float power, flow, flow_temperature, return_temperature, delta_t;
-    const char *code;
-    uint32_t raw;
+    const char *error_code;
+    uint32_t raw_error_status;
   };
-  const Capture captures[] = {
-      {0, 0, 65.22f, 37.75f, 27.46f, "0000", 0},
-      {0, 0, 24.95f, 23.68f, 1.26f, "4000", 0x04000000},
-      {29.266f, 0.726f, 79.51f, 41.44f, 38.06f, "0000", 0},
+  const CaptureCase captures[] = {
+      {"tests/fixtures/wired_zero_flow.hex", 0, 0, 65.22f, 37.75f, 27.46f, "0000", 0},
+      {"tests/fixtures/wired_low_delta_t_error.hex", 0, 0, 24.95f, 23.68f, 1.26f, "4000", 0x04000000},
+      {"tests/fixtures/wired_high_flow.hex", 29.266f, 0.726f, 79.51f, 41.44f, 38.06f, "0000", 0},
   };
-  for (unsigned i = 0; i < 3; ++i) {
-    std::ifstream capture_input(argv[3 + i]);
+  for (const auto &expected : captures) {
+    std::ifstream capture_input(expected.path);
     std::vector<uint8_t> capture;
     while (capture_input >> std::hex >> byte) capture.push_back(static_cast<uint8_t>(byte));
     assert(capture.size() == 99);
@@ -257,18 +258,17 @@ int main(int argc, char **argv) {
     assert(parse_frame(capture.data(), capture.size(), data) == FrameResult::OK);
     assert(data.response_address == 0x2C && data.serial_number == "01234567");
     assert(data.manufacturer == "AXI" && data.protocol_version == 11);
-    const auto &expected = captures[i];
     near(data.power, expected.power);
     near(data.flow, expected.flow);
     near(data.flow_temperature, expected.flow_temperature);
     near(data.return_temperature, expected.return_temperature);
     near(data.temperature_difference, expected.delta_t);
-    assert(data.error_code.present && data.error_code.value == expected.code);
-    assert(data.raw_error_status.present && data.raw_error_status.value == expected.raw);
+    assert(data.error_code.present && data.error_code.value == expected.error_code);
+    assert(data.raw_error_status.present && data.raw_error_status.value == expected.raw_error_status);
     assert(data.error_start.present);
-    assert(data.error_start.value == (expected.raw == 0 ? "No error" : "2000-01-01 00:00"));
+    assert(data.error_start.value == (expected.raw_error_status == 0 ? "No error" : "2000-01-01 00:00"));
     expect_clean_frame(capture);
-    assert(data.error_code.value == expected.code);
+    assert(data.error_code.value == expected.error_code);
   }
   std::cout << "Parser and incremental receiver tests passed\n";
 }
