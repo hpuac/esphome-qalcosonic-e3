@@ -41,6 +41,8 @@ uart:
 
 qalcosonic_e3:
   uart_id: mbus_uart
+  transport: optical
+  address: 0x01 # Tested optical address; use your wired address (tested: 0x2C).
   update_interval: 2min
   unavailable_after_failures: 5
   energy:
@@ -81,3 +83,5 @@ qalcosonic_e3:
     name: "Automatic Readout"
   read_now:
     name: "Read Now"
+  discover_address:
+    name: "Discover M-Bus Address"

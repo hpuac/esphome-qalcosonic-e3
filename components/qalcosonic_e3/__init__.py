@@ -1,9 +1,9 @@
-"""Axioma QALCOSONIC E3 optical M-Bus readout."""
+"""Axioma QALCOSONIC E3 optical and wired M-Bus readout."""
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import binary_sensor, button, sensor, switch, text_sensor, uart
-from esphome.const import CONF_DISABLED_BY_DEFAULT, CONF_ID
+from esphome.const import CONF_ADDRESS, CONF_DISABLED_BY_DEFAULT, CONF_ID
 
 DEPENDENCIES = ["uart"]
 AUTO_LOAD = ["sensor", "text_sensor", "binary_sensor", "button", "switch"]
@@ -11,11 +11,25 @@ MULTI_CONF = True
 ns = cg.esphome_ns.namespace("qalcosonic_e3")
 QalcosonicE3 = ns.class_("QalcosonicE3", cg.PollingComponent, uart.UARTDevice)
 ReadNowButton = ns.class_("ReadNowButton", button.Button)
+DiscoverAddressButton = ns.class_("DiscoverAddressButton", button.Button)
+Transport = ns.enum("Transport", is_class=True)
+TRANSPORTS = {"optical": Transport.OPTICAL, "wired": Transport.WIRED}
 AutomaticReadoutSwitch = ns.class_("AutomaticReadoutSwitch", switch.Switch, cg.Component)
 
 
 def diagnostic(schema):
     return schema.extend({cv.Optional(CONF_DISABLED_BY_DEFAULT, default=True): cv.boolean})
+
+
+def validate_address(value):
+    if value == "auto":
+        return value
+    if isinstance(value, (float, bool)):
+        raise cv.Invalid("M-Bus address must be an integer")
+    address = cv.uint8_t(value)
+    if address > 0xFA and address != 0xFE:
+        raise cv.Invalid("Supported M-Bus addresses are 0x00–0xFA and the test/point-to-point address 0xFE")
+    return address
 
 
 SENSORS = {
@@ -130,6 +144,8 @@ CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(QalcosonicE3),
+            cv.Required(CONF_ADDRESS): validate_address,
+            cv.Required("transport"): cv.enum(TRANSPORTS),
             cv.Optional("unavailable_after_failures", default=0): cv.uint32_t,
             **{cv.Optional(key): schema for key, schema in SENSORS.items()},
             **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},
@@ -137,6 +153,9 @@ CONFIG_SCHEMA = (
                 device_class="connectivity", entity_category="diagnostic"
             ),
             cv.Optional("read_now"): button.button_schema(ReadNowButton, entity_category="config", icon="mdi:refresh"),
+            cv.Optional("discover_address"): button.button_schema(
+                DiscoverAddressButton, entity_category="config", icon="mdi:magnify"
+            ),
             cv.Optional("automatic_readout"): switch.switch_schema(
                 AutomaticReadoutSwitch,
                 block_inverted=True,
@@ -165,6 +184,11 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
+    cg.add(var.set_transport(config["transport"]))
+    if config[CONF_ADDRESS] == "auto":
+        cg.add(var.set_auto_address())
+    else:
+        cg.add(var.set_address(config[CONF_ADDRESS]))
     cg.add(var.set_unavailable_after_failures(config["unavailable_after_failures"]))
     for key in SENSORS:
         if key in config:
@@ -179,6 +203,9 @@ async def to_code(config):
         cg.add(var.set_readout_successful(entity))
     if "read_now" in config:
         entity = await button.new_button(config["read_now"])
+        cg.add(entity.set_parent(var))
+    if "discover_address" in config:
+        entity = await button.new_button(config["discover_address"])
         cg.add(entity.set_parent(var))
     if "automatic_readout" in config:
         entity = await switch.new_switch(config["automatic_readout"])

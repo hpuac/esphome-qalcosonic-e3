@@ -35,6 +35,7 @@ def validate(value, expected=True):
 
 
 validated = validate(config)["qalcosonic_e3"][0]
+assert validated["address"] == 0x01
 assert validated["energy"]["state_class"] == "total_increasing"
 assert validated["volume"]["device_class"] == "water"
 assert validated["readout_failures"]["state_class"] == "measurement"
@@ -44,7 +45,23 @@ assert validated["readout_successful"]["device_class"] == "connectivity"
 assert validated["automatic_readout"]["restore_mode"] == "ALWAYS_ON"
 assert validated["automatic_readout"]["entity_category"] == "config"
 assert validated["unavailable_after_failures"] == 5
-config["qalcosonic_e3"] = {"uart_id": "mbus_uart"}
+config["qalcosonic_e3"] = {"uart_id": "mbus_uart", "transport": "optical"}
+validate(config, False)  # The interface's address must be configured explicitly.
+config["qalcosonic_e3"]["address"] = 0x01
+del config["qalcosonic_e3"]["transport"]
+validate(config, False)
+for transport in ("optical", "wired"):
+    config["qalcosonic_e3"]["transport"] = transport
+    assert validate(config)["qalcosonic_e3"][0]["transport"] == transport
+for transport in ("invalid", "OPTICAL", 0):
+    config["qalcosonic_e3"]["transport"] = transport
+    validate(config, False)
+config["qalcosonic_e3"]["address"] = "auto"
+for transport in ("optical", "wired"):
+    config["qalcosonic_e3"]["transport"] = transport
+    assert validate(config)["qalcosonic_e3"][0]["address"] == "auto"
+config["qalcosonic_e3"]["transport"] = "optical"
+config["qalcosonic_e3"]["address"] = 0x01
 # Every entity is optional, and invalidation is disabled unless configured.
 assert validate(config)["qalcosonic_e3"][0]["unavailable_after_failures"] == 0
 for threshold in (0, 1, 5, 4294967295):
@@ -54,6 +71,15 @@ for threshold in (-1, 1.5, 4294967296, "invalid"):
     config["qalcosonic_e3"]["unavailable_after_failures"] = threshold
     validate(config, False)
 del config["qalcosonic_e3"]["unavailable_after_failures"]
+for address in (0x00, 0x01, 0x2C, 0xFA, 0xFE, "0x2C", "0xFE"):
+    config["qalcosonic_e3"]["address"] = address
+    assert validate(config)["qalcosonic_e3"][0]["address"] == (
+        int(address, 16) if isinstance(address, str) else address
+    )
+for address in (-1, 0xFB, 0xFC, 0xFD, 0xFF, 256, 1.0, 1.5, "invalid"):
+    config["qalcosonic_e3"]["address"] = address
+    validate(config, False)
+config["qalcosonic_e3"]["address"] = 0x01
 config["uart"]["parity"] = "NONE"
 validate(config, False)
 config["uart"]["parity"] = "EVEN"

@@ -7,6 +7,7 @@
 #include <iostream>
 #include <vector>
 
+#include "link.h"
 #include "parser.h"
 using namespace esphome::qalcosonic_e3;
 void near(const Value<float> &value, float expected) {
@@ -18,7 +19,7 @@ void checksum(std::vector<uint8_t> &frame) {
   frame[frame.size() - 2] = sum;
 }
 int main(int argc, char **argv) {
-  assert(argc == 2);
+  assert(argc == 3);
   std::ifstream input(argv[1]);
   std::vector<uint8_t> frame;
   unsigned byte;
@@ -147,5 +148,57 @@ int main(int argc, char **argv) {
   for (uint8_t b : frame) accepted += receiver.push(b, data, error);
   for (uint8_t b : frame) accepted += receiver.push(b, data, error);
   assert(accepted == 3);
+  // Both serial fields were anonymized to 01234567 and the checksum recalculated.
+  std::ifstream wired_input(argv[2]);
+  std::vector<uint8_t> wired;
+  while (wired_input >> std::hex >> byte) wired.push_back(static_cast<uint8_t>(byte));
+  assert(wired.size() == 99);
+  assert(parse_frame(wired.data(), wired.size(), data) == FrameResult::OK);
+  assert(data.response_address == 0x2C);
+  assert(data.serial_number == "01234567");
+  assert(data.manufacturer == "AXI" && data.protocol_version == 11);
+  assert(data.error_code.present && data.error_code.value == 0);
+  near(data.energy, 0.260f);
+  near(data.volume, 12.793f);
+  near(data.power, 0.213f);
+  near(data.flow, 0.015f);
+  near(data.flow_temperature, 62.33f);
+  near(data.return_temperature, 50.28f);
+  near(data.temperature_difference, 12.05f);
+  expect_clean_frame(wired);
+  assert(data.response_address == 0x2C);
+  LinkState auto_link;
+  auto_link.set_auto_address();
+  assert(auto_link.start()[2] == 0xFE);
+  assert(auto_link.accept_ack(0xE5));
+  const auto discovery_request = auto_link.start();
+  assert(discovery_request[1] == 0x7B && discovery_request[2] == 0xFE);
+  auto_link.timeout();
+  assert(auto_link.discovering() && auto_link.start() == discovery_request);
+  receiver.clear();
+  for (uint8_t b : wired) {
+    if (receiver.push(b, data, error)) assert(auto_link.accept_response(data.response_address));
+  }
+  assert(auto_link.address() == 0x2C && auto_link.start()[2] == 0x2C);
+  // Feed complete optical and wired frames through the receiver and address gate.
+  // An ignored frame must not prevent a matching frame in the same readout.
+  for (uint8_t address : {0x2C, 0xFE}) {
+    LinkState link;
+    link.set_address(address);
+    link.start();
+    assert(link.accept_ack(0xE5));
+    link.start();
+    receiver.clear();
+    unsigned responses = 0;
+    for (const auto *bytes : {&frame, &wired}) {
+      for (uint8_t b : *bytes) {
+        if (!receiver.push(b, data, error)) continue;
+        if (!link.accept_response(data.response_address)) continue;
+        ++responses;
+        if (address == 0xFE && responses == 1) link.start();
+      }
+    }
+    assert(responses == (address == 0xFE ? 2U : 1U));
+  }
   std::cout << "Parser and incremental receiver tests passed\n";
 }

@@ -20,6 +20,7 @@ struct Value {
 };
 
 struct MeterData {
+  uint8_t response_address{0};
   std::string serial_number;
   std::string manufacturer;
   uint8_t protocol_version{0};

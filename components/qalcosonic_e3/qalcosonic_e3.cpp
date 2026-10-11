@@ -10,7 +10,6 @@
 namespace esphome {
 namespace qalcosonic_e3 {
 static const char *const TAG = "qalcosonic_e3";
-static constexpr uint32_t LINK_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 void QalcosonicE3::setup() {
   // PollingComponent starts its timer before setup(), even if the switch started off.
@@ -37,11 +36,23 @@ void QalcosonicE3::set_automatic_readout_enabled(bool enabled) {
 
 void QalcosonicE3::read_now() { this->request_read_(); }
 
+void QalcosonicE3::discover_address() {
+  if (!this->ready_ || this->pending_) {
+    ESP_LOGW(TAG, "Cannot discover address before startup completes or while a read is pending");
+    return;
+  }
+  this->manual_discovery_ = true;
+  this->link_.start_discovery();
+  this->request_read_();
+}
+
 void QalcosonicE3::request_read_() {
   if (!this->ready_ || this->pending_) return;
-  // The optical interface goes inactive after five minutes without communication.
-  if (!this->link_.needs_reset() && millis() - this->last_link_activity_at_ >= LINK_IDLE_TIMEOUT_MS)
-    this->link_.reset();
+  this->cancel_timeout("post_ack_request");
+  this->waiting_for_data_request_ = false;
+  ++this->readout_generation_;
+  this->link_.prepare_read(millis() - this->last_link_activity_at_);
+  if (this->link_.discovering()) ESP_LOGI(TAG, "Starting M-Bus address discovery using 0xFE");
   // Discard bytes left over from a previous request before starting a new one.
   uint8_t byte;
   for (size_t i = 0; i < 512 && this->available(); ++i) this->read_byte(&byte);
@@ -57,7 +68,8 @@ void QalcosonicE3::send_link_request_() {
   const bool initializing = this->link_.needs_reset();
   const auto request = this->link_.start();
   this->requested_at_ = millis();
-  ESP_LOGD(TAG, "Sending M-Bus %s (0x%02X) to QALCOSONIC E3", initializing ? "SND_NKE" : "REQ_UD2", request[1]);
+  ESP_LOGD(TAG, "Sending M-Bus %s (0x%02X) to address 0x%02X", initializing ? "SND_NKE" : "REQ_UD2", request[1],
+           request[2]);
   this->write_array(request.data(), request.size());
 }
 
@@ -92,20 +104,47 @@ void QalcosonicE3::loop() {
       this->uart_trace_[this->uart_trace_size_++] = byte;
     else
       this->uart_trace_truncated_ = true;
+    if (this->waiting_for_data_request_) continue;
     if (this->link_.awaiting_ack()) {
       if (this->link_.accept_ack(byte)) {
         this->last_link_activity_at_ = millis();
-        this->send_link_request_();
+        this->waiting_for_data_request_ = true;
+        const uint32_t generation = this->readout_generation_;
+        ESP_LOGD(TAG, "Scheduling M-Bus REQ_UD2 100 ms after SND_NKE acknowledgement");
+        this->set_timeout("post_ack_request", 100, [this, generation]() {
+          if (generation != this->readout_generation_ || !this->pending_ || !this->waiting_for_data_request_) return;
+          this->waiting_for_data_request_ = false;
+          if (this->link_.needs_reset() || this->link_.awaiting_ack()) return;
+          this->send_link_request_();
+        });
       }
       continue;
     }
     MeterData data;
     FrameResult error;
     if (this->receiver_.push(byte, data, error)) {
+      const bool discovering = this->link_.discovering();
+      const uint8_t requested_address = this->link_.request_address();
+      if (!this->link_.accept_response(data.response_address)) {
+        ESP_LOGW(TAG, "Ignoring M-Bus response from address 0x%02X; expected 0x%02X", data.response_address,
+                 requested_address);
+        continue;
+      }
+      if (discovering) {
+        ESP_LOGI(TAG, "Discovered M-Bus primary address: 0x%02X", data.response_address);
+        if (this->link_.auto_address())
+          ESP_LOGI(TAG, "Using discovered M-Bus address 0x%02X", this->link_.address());
+        else
+          ESP_LOGI(TAG, "Keeping configured M-Bus address 0x%02X", this->link_.configured_address());
+      } else if (requested_address == 0xFE)
+        ESP_LOGI(TAG, "Meter responded with primary address 0x%02X", data.response_address);
       this->pending_ = false;
       this->log_uart_trace_();
-      this->link_.accept_response();
       this->last_link_activity_at_ = millis();
+      if (this->manual_discovery_) {
+        this->manual_discovery_ = false;
+        continue;  // Manual discovery only reports the address, not measurements.
+      }
       this->consecutive_failures_ = 0;
       this->measurements_invalidated_ = false;
       if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(0);
@@ -118,11 +157,28 @@ void QalcosonicE3::loop() {
   }
   // Process already-buffered UART data before declaring a request timed out.
   // Unsigned subtraction remains correct across millis() wraparound.
-  if (this->pending_ && millis() - this->requested_at_ >= 2000) {
-    this->pending_ = false;
+  if (this->pending_ && !this->waiting_for_data_request_ && millis() - this->requested_at_ >= 2000) {
     this->log_uart_trace_();
     const bool awaiting_ack = this->link_.awaiting_ack();
     this->link_.timeout();
+    if (!this->link_.needs_reset()) {
+      // Continue the same logical readout; only exhaustion updates diagnostics.
+      ESP_LOGD(TAG, "Retrying M-Bus REQ_UD2 with the same FCB");
+      this->receiver_.clear();
+      this->uart_trace_size_ = 0;
+      this->uart_trace_truncated_ = false;
+      this->frame_error_ = FrameResult::INCOMPLETE;
+      this->send_link_request_();
+      return;
+    }
+    this->pending_ = false;
+    if (this->manual_discovery_) {
+      this->link_.end_discovery();
+      this->manual_discovery_ = false;
+      ESP_LOGW(TAG, "M-Bus address discovery timed out; active address remains 0x%02X", this->link_.address());
+      this->receiver_.clear();
+      return;
+    }
     if (this->consecutive_failures_ != std::numeric_limits<uint32_t>::max()) ++this->consecutive_failures_;
     if (this->unavailable_after_failures_ != 0 && !this->measurements_invalidated_ &&
         this->consecutive_failures_ >= this->unavailable_after_failures_) {
@@ -174,7 +230,12 @@ void QalcosonicE3::publish_(const MeterData &data) {
 }
 
 void QalcosonicE3::dump_config() {
-  ESP_LOGCONFIG(TAG, "QALCOSONIC E3 (optical M-Bus, address 0x01)");
+  ESP_LOGCONFIG(TAG, "QALCOSONIC E3 (M-Bus, address 0x%02X)", this->link_.address());
+  ESP_LOGCONFIG(TAG, "  Transport: %s", this->link_.transport() == Transport::OPTICAL ? "optical" : "wired");
+  if (this->link_.auto_address())
+    ESP_LOGCONFIG(TAG, "  Configured address: auto (discovered at runtime, not persisted)");
+  else
+    ESP_LOGCONFIG(TAG, "  Configured address: 0x%02X", this->link_.configured_address());
   LOG_UPDATE_INTERVAL(this);
   ESP_LOGCONFIG(TAG, "  Unavailable after consecutive failures: %lu (0 = disabled)",
                 static_cast<unsigned long>(this->unavailable_after_failures_));
