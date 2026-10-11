@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdint>
 
+#include "protocol.h"
+
 namespace esphome {
 namespace qalcosonic_e3 {
 
@@ -21,7 +23,7 @@ class LinkState {
   void set_auto_address() {
     this->auto_address_ = true;
     this->address_discovered_ = false;
-    this->address_ = 0xFE;
+    this->address_ = mbus::POINT_TO_POINT_ADDRESS;
     this->start_discovery();
   }
   void set_transport(Transport transport) { this->transport_ = transport; }
@@ -29,7 +31,7 @@ class LinkState {
   bool auto_address() const { return this->auto_address_; }
   uint8_t configured_address() const { return this->configured_address_; }
   uint8_t address() const { return this->address_; }
-  uint8_t request_address() const { return this->discovering_ ? 0xFE : this->address_; }
+  uint8_t request_address() const { return this->discovering_ ? mbus::POINT_TO_POINT_ADDRESS : this->address_; }
   bool discovering() const { return this->discovering_; }
   void start_discovery() {
     this->discovering_ = true;
@@ -41,7 +43,7 @@ class LinkState {
     this->reset();
   }
   void prepare_read(uint32_t idle_ms) {
-    if (this->transport_ == Transport::OPTICAL && idle_ms >= 5 * 60 * 1000) this->reset();
+    if (this->transport_ == Transport::OPTICAL && idle_ms >= OPTICAL_IDLE_TIMEOUT_MS) this->reset();
   }
   bool needs_reset() const { return this->phase_ == Phase::NEED_RESET; }
   bool awaiting_ack() const { return this->phase_ == Phase::AWAITING_ACK; }
@@ -54,15 +56,15 @@ class LinkState {
   std::array<uint8_t, 5> start() {
     if (this->needs_reset()) {
       this->phase_ = Phase::AWAITING_ACK;
-      return this->short_frame_(0x40);  // SND_NKE
+      return this->short_frame_(mbus::SND_NKE);
     }
     this->phase_ = Phase::AWAITING_DATA;
-    const uint8_t control = this->next_fcb_ ? 0x7B : 0x5B;
+    const uint8_t control = this->next_fcb_ ? mbus::REQ_UD2_FCB_SET : mbus::REQ_UD2_FCB_CLEAR;
     return this->short_frame_(control);
   }
 
   bool accept_ack(uint8_t byte) {
-    if (!this->awaiting_ack() || byte != 0xE5) return false;
+    if (!this->awaiting_ack() || byte != mbus::ACK) return false;
     this->phase_ = Phase::READY;
     this->next_fcb_ = true;
     this->failed_requests_ = 0;
@@ -71,8 +73,9 @@ class LinkState {
 
   bool accept_response(uint8_t response_address) {
     const uint8_t requested = this->request_address();
-    if (this->phase_ != Phase::AWAITING_DATA || (requested != 0xFE && response_address != requested) ||
-        (requested == 0xFE && response_address > 0xFA))
+    if (this->phase_ != Phase::AWAITING_DATA ||
+        (requested != mbus::POINT_TO_POINT_ADDRESS && response_address != requested) ||
+        (requested == mbus::POINT_TO_POINT_ADDRESS && response_address > mbus::MAX_PRIMARY_ADDRESS))
       return false;
     if (this->discovering_) {
       if (this->auto_address_) {
@@ -95,7 +98,7 @@ class LinkState {
       this->reset();
     } else if (this->phase_ == Phase::AWAITING_DATA) {
       // Retry the same FCB twice, including discovery; then resynchronize.
-      if (++this->failed_requests_ >= 3)
+      if (++this->failed_requests_ >= MAX_DATA_ATTEMPTS)
         this->reset();
       else
         this->phase_ = Phase::READY;
@@ -103,9 +106,12 @@ class LinkState {
   }
 
  private:
+  static constexpr uint32_t OPTICAL_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+  static constexpr uint8_t MAX_DATA_ATTEMPTS = 3;
+
   std::array<uint8_t, 5> short_frame_(uint8_t control) const {
     const uint8_t address = this->request_address();
-    return {{0x10, control, address, static_cast<uint8_t>(control + address), 0x16}};
+    return {{mbus::SHORT_FRAME_START, control, address, static_cast<uint8_t>(control + address), mbus::FRAME_STOP}};
   }
   Transport transport_{Transport::OPTICAL};  // Required ESPHome setting overrides this before use.
   uint8_t configured_address_{0};

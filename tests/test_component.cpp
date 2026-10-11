@@ -14,12 +14,11 @@ enum class Mode { EXPLICIT_FE, AUTO, TARGETED, MANUAL_EXPLICIT, MANUAL_AUTO };
 
 class TestComponent : public QalcosonicE3 {
  public:
-  bool pending() const { return this->pending_; }
-  bool waiting_for_data_request() const { return this->waiting_for_data_request_; }
+  bool pending() const { return this->readout_pending_(); }
+  bool waiting_for_data_request() const { return this->readout_state_ == ReadoutState::ACK_DELAY; }
   void abort_readout() {
-    this->pending_ = false;
-    this->waiting_for_data_request_ = false;
-    this->manual_discovery_ = false;
+    this->readout_state_ = ReadoutState::IDLE;
+    this->readout_purpose_ = ReadoutPurpose::MEASUREMENTS;
     this->link_.reset();
     this->cancel_timeout("post_ack_request");
   }

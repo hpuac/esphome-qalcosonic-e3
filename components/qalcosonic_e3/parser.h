@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <string>
 
+#include "protocol.h"
+
 namespace esphome {
 namespace qalcosonic_e3 {
 
@@ -44,7 +46,7 @@ class FrameReceiver {
   size_t size() const { return this->size_; }
 
  protected:
-  std::array<uint8_t, 261> buffer_{};
+  std::array<uint8_t, mbus::MAX_LONG_FRAME_SIZE> buffer_{};
   size_t size_{0};
 };
 

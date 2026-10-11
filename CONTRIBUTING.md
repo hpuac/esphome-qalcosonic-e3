@@ -3,6 +3,36 @@
 The component lives in `components/qalcosonic_e3/`. Python defines the
 configuration schemas; C++ handles UART reception, parsing, and publishing.
 
+## Code structure and readout flow
+
+- `__init__.py` validates YAML options and connects entities to the C++ component.
+- `protocol.h` names shared M-Bus frame bytes, addresses, and frame sizes.
+- `link.h` owns link initialization, address discovery, and the frame count bit
+  (FCB). After a response, the next request toggles FCB; retries reuse the same
+  bit so the meter can repeat its response.
+- `parser.cpp` checks frame boundaries and checksum. Its `RecordReader` walks
+  records once, skips unknown records, and passes supported records to
+  `decode_record()`. The first occurrence of a supported record wins.
+- `qalcosonic_e3.cpp` schedules requests, receives UART bytes, handles timeouts,
+  and publishes parsed values to ESPHome entities.
+
+After startup, the component moves from `STARTING` to `IDLE`. A read enters
+`WAITING_FOR_REPLY` and asks `LinkState` for either SND_NKE (initialize the link)
+or REQ_UD2 (request data). A SND_NKE acknowledgement enters `ACK_DELAY`; after
+100 ms, the component sends REQ_UD2 and returns to `WAITING_FOR_REPLY`.
+
+A matching response ends the readout in `IDLE`. A data request gets up to three
+attempts, each with a two-second timeout. Only exhaustion counts as one failed
+readout; a missing initialization acknowledgement ends the readout immediately
+after its two-second timeout. Manual discovery uses the same flow but reports
+the address without publishing measurements or changing readout diagnostics.
+
+`Value<T>::present` distinguishes a missing record from a received zero. Missing
+values leave existing entity states unchanged. The parser currently keeps values
+decoded before a truncated record or an unsupported variable-length encoding;
+header-only frames are also accepted. Keep these semantics in mind when changing
+record traversal.
+
 ## Local development
 
 Nix is **optional**. You can use your locally installed Python, Git, and a

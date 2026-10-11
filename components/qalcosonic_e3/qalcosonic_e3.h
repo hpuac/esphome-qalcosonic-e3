@@ -53,15 +53,27 @@ class QalcosonicE3 : public PollingComponent, public uart::UARTDevice {
   void request_read_();
   void send_link_request_();
   void log_uart_trace_();
+  void record_uart_byte_(uint8_t byte);
+  void reset_receive_attempt_();
+  void handle_ack_(uint8_t byte);
+  void handle_response_(const MeterData &data);
+  void handle_timeout_();
+  void retry_readout_();
+  void finish_failed_readout_(bool awaiting_ack);
+  // Readout scheduling lives here; LinkState owns ACK/data phases and FCB retries.
+  enum class ReadoutState { STARTING, IDLE, WAITING_FOR_REPLY, ACK_DELAY };
+  enum class ReadoutPurpose { MEASUREMENTS, ADDRESS_DISCOVERY };
+  bool readout_pending_() const {
+    return this->readout_state_ == ReadoutState::WAITING_FOR_REPLY || this->readout_state_ == ReadoutState::ACK_DELAY;
+  }
+  static constexpr size_t UART_TRACE_CAPACITY = 512;
   FrameReceiver receiver_;
   LinkState link_;
-  std::array<uint8_t, 512> uart_trace_{};
+  std::array<uint8_t, UART_TRACE_CAPACITY> uart_trace_{};
   size_t uart_trace_size_{0};
   bool uart_trace_truncated_{false};
-  bool ready_{false};
-  bool pending_{false};
-  bool waiting_for_data_request_{false};
-  bool manual_discovery_{false};
+  ReadoutState readout_state_{ReadoutState::STARTING};
+  ReadoutPurpose readout_purpose_{ReadoutPurpose::MEASUREMENTS};
   FrameResult frame_error_{FrameResult::INCOMPLETE};
   bool measurements_invalidated_{false};
   bool automatic_readout_enabled_{true};

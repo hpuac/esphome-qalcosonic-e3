@@ -64,11 +64,108 @@ size_t record_data_size(uint8_t dif) {
       return 0;
   }
 }
+// Views point into the frame; record traversal does not allocate or copy payloads.
+struct Record {
+  const uint8_t *header;
+  size_t header_size;
+  const uint8_t *data;
+  size_t data_size;
+
+  bool matches(std::initializer_list<uint8_t> pattern, size_t width) const {
+    return this->header_size == pattern.size() && width <= this->data_size &&
+           std::equal(pattern.begin(), pattern.end(), this->header);
+  }
+};
+
+class RecordReader {
+ public:
+  RecordReader(const uint8_t *data, size_t end) : data_(data), end_(end) {}
+
+  // Preserve partial decoding: truncation or an unsupported LVAR ends traversal.
+  bool next(Record &record) {
+    while (this->position_ < this->end_) {
+      const size_t start = this->position_;
+      const uint8_t dif = this->data_[this->position_++];
+      if (dif == 0x2F) continue;               // Idle filler.
+      if ((dif & 0x0F) == 0x0F) return false;  // Manufacturer-specific data.
+      if (!this->skip_extensions_(dif)) return false;
+      if (this->position_ >= this->end_) return false;
+      const uint8_t vif = this->data_[this->position_++];
+      if (!this->skip_extensions_(vif)) return false;
+      size_t data_size = record_data_size(dif);
+      if ((dif & 0x0F) == 0x0D && !this->read_variable_size_(data_size)) return false;
+      if (data_size > this->end_ - this->position_) return false;
+      record = {this->data_ + start, this->position_ - start, this->data_ + this->position_, data_size};
+      this->position_ += data_size;
+      return true;
+    }
+    return false;
+  }
+
+ private:
+  bool skip_extensions_(uint8_t field) {
+    while (field & 0x80) {
+      if (this->position_ >= this->end_) return false;
+      field = this->data_[this->position_++];
+    }
+    return true;
+  }
+
+  bool read_variable_size_(size_t &size) {
+    if (this->position_ >= this->end_) return false;
+    const uint8_t lvar = this->data_[this->position_++];
+    if (lvar <= 0xBF)
+      size = lvar;
+    else if (lvar >= 0xC0 && lvar <= 0xC9)
+      size = lvar - 0xC0;
+    else if (lvar >= 0xD0 && lvar <= 0xD9)
+      size = lvar - 0xD0;
+    else if (lvar >= 0xE0 && lvar <= 0xEF)
+      size = lvar - 0xE0;
+    else
+      return false;
+    return true;
+  }
+
+  const uint8_t *data_;
+  size_t end_;
+  size_t position_{mbus::RECORDS_OFFSET};
+};
+
 std::string datetime(const uint8_t *p) {
   const unsigned year = 2000U + ((p[2] >> 5) & 7U) + ((p[3] >> 4) & 15U) * 8U;
   char text[20];
   std::snprintf(text, sizeof(text), "%04u-%02u-%02u %02u:%02u", year, p[3] & 15U, p[2] & 31U, p[1] & 31U, p[0] & 63U);
   return text;
+}
+
+void decode_record(const Record &record, MeterData &decoded) {
+  const uint8_t *value = record.data;
+  // Keep the first occurrence of each supported record, as before.
+  if (!decoded.meter_datetime.present && record.matches({0x04, 0x6D}, 4))
+    decoded.meter_datetime.set(datetime(value));
+  else if (!decoded.error_start.present && record.matches({0x34, 0x6D}, 4))
+    decoded.error_start.set(datetime(value));
+  else if (!decoded.raw_error_status.present && record.matches({0x34, 0xFD, 0x17}, 4))
+    decoded.raw_error_status.set(read_u32(value));
+  else if (!decoded.battery_operating_duration.present && record.matches({0x04, 0x20}, 4))
+    decoded.battery_operating_duration.set(read_u32(value) / 3600.0f / 24.0f);  // Seconds to days.
+  else if (!decoded.operating_time_without_error.present && record.matches({0x04, 0x24}, 4))
+    decoded.operating_time_without_error.set(read_u32(value) / 3600.0f / 24.0f);
+  else if (!decoded.energy.present && record.matches({0x04, 0x86, 0x3B}, 4))
+    decoded.energy.set(read_u32(value) / 1000.0f);  // kWh to MWh.
+  else if (!decoded.volume.present && record.matches({0x04, 0x13}, 4))
+    decoded.volume.set(read_u32(value) / 1000.0f);  // Litres to m³.
+  else if (!decoded.power.present && record.matches({0x04, 0x2B}, 4))
+    decoded.power.set(read_i32(value) / 1000.0f);  // W to kW.
+  else if (!decoded.flow.present && record.matches({0x04, 0x3B}, 4))
+    decoded.flow.set(read_i32(value) / 1000.0f);  // Litres/h to m³/h.
+  else if (!decoded.flow_temperature.present && record.matches({0x02, 0x59}, 2))
+    decoded.flow_temperature.set(read_i16(value) / 100.0f);  // Hundredths of °C.
+  else if (!decoded.return_temperature.present && record.matches({0x02, 0x5D}, 2))
+    decoded.return_temperature.set(read_i16(value) / 100.0f);
+  else if (!decoded.temperature_difference.present && record.matches({0x02, 0x61}, 2))
+    decoded.temperature_difference.set(read_i16(value) / 100.0f);  // Hundredths of K.
 }
 }  // namespace
 
@@ -93,17 +190,18 @@ const char *frame_result_message(FrameResult result) {
 }
 
 FrameResult parse_frame(const uint8_t *data, size_t size, MeterData &result) {
-  if (size < 4) return FrameResult::INCOMPLETE;
-  if (data[0] != 0x68 || data[1] != data[2] || data[3] != 0x68) return FrameResult::MALFORMED;
-  const size_t total = static_cast<size_t>(data[1]) + 6;
+  if (size < mbus::LONG_FRAME_PREFIX_SIZE) return FrameResult::INCOMPLETE;
+  if (data[0] != mbus::LONG_FRAME_START || data[1] != data[2] || data[3] != mbus::LONG_FRAME_START)
+    return FrameResult::MALFORMED;
+  const size_t total = static_cast<size_t>(data[1]) + mbus::LONG_FRAME_OVERHEAD;
   if (size < total) return FrameResult::INCOMPLETE;
-  if (data[total - 1] != 0x16) return FrameResult::INVALID_STOP;
+  if (data[total - 1] != mbus::FRAME_STOP) return FrameResult::INVALID_STOP;
   uint8_t checksum = 0;
-  for (size_t i = 4; i < total - 2; ++i) checksum += data[i];
+  for (size_t i = mbus::LONG_FRAME_PREFIX_SIZE; i < total - mbus::FRAME_TRAILER_SIZE; ++i) checksum += data[i];
   if (checksum != data[total - 2]) return FrameResult::CHECKSUM;
-  if (data[1] < 3) return FrameResult::SHORT_HEADER;
-  if (data[6] != 0x72) return FrameResult::UNEXPECTED_CI;
-  if (data[1] < 15) return FrameResult::SHORT_HEADER;
+  if (data[1] < mbus::LINK_HEADER_SIZE) return FrameResult::SHORT_HEADER;
+  if (data[6] != mbus::VARIABLE_DATA_CI) return FrameResult::UNEXPECTED_CI;
+  if (data[1] < mbus::RESPONSE_HEADER_SIZE) return FrameResult::SHORT_HEADER;
 
   MeterData decoded;
   decoded.response_address = data[5];
@@ -116,65 +214,16 @@ FrameResult parse_frame(const uint8_t *data, size_t size, MeterData &result) {
                           static_cast<char>((man & 31) + 64), '\0'};
   decoded.manufacturer = manufacturer;
   decoded.protocol_version = data[13];
-  const size_t end = total - 2;
-  auto find = [&](std::initializer_list<uint8_t> pattern, size_t width) -> const uint8_t * {
-    for (size_t p = 19; p < end;) {
-      const size_t start = p;
-      const uint8_t dif = data[p++];
-      if (dif == 0x2F) continue;        // Idle filler.
-      if ((dif & 0x0F) == 0x0F) break;  // Manufacturer-specific data.
-      while (dif & 0x80) {
-        if (p >= end) return nullptr;
-        const uint8_t dife = data[p++];
-        if (!(dife & 0x80)) break;
-      }
-      if (p >= end) return nullptr;
-      uint8_t vif = data[p++];
-      while (vif & 0x80) {
-        if (p >= end) return nullptr;
-        vif = data[p++];
-      }
-      size_t data_size = record_data_size(dif);
-      if ((dif & 0x0F) == 0x0D) {
-        if (p >= end) return nullptr;
-        const uint8_t lvar = data[p++];
-        if (lvar <= 0xBF)
-          data_size = lvar;
-        else if (lvar >= 0xC0 && lvar <= 0xC9)
-          data_size = lvar - 0xC0;
-        else if (lvar >= 0xD0 && lvar <= 0xD9)
-          data_size = lvar - 0xD0;
-        else if (lvar >= 0xE0 && lvar <= 0xEF)
-          data_size = lvar - 0xE0;
-        else
-          return nullptr;
-      }
-      if (data_size > end - p) return nullptr;
-      if (p - start == pattern.size() && std::equal(pattern.begin(), pattern.end(), data + start))
-        return width <= data_size ? data + p : nullptr;
-      p += data_size;
-    }
-    return nullptr;
-  };
-  const uint8_t *p;
-  if ((p = find({0x04, 0x6D}, 4))) decoded.meter_datetime.set(datetime(p));
-  if ((p = find({0x34, 0xFD, 0x17}, 4))) {
-    decoded.raw_error_status.set(read_u32(p));
+  RecordReader records(data, total - mbus::FRAME_TRAILER_SIZE);
+  Record record{};
+  while (records.next(record)) decode_record(record, decoded);
+  // Error start depends on status, regardless of the records' order.
+  if (decoded.raw_error_status.present) {
     decoded.error_code.set(lcd_error_code(decoded.raw_error_status.value));
-    if (decoded.raw_error_status.value == 0)
-      decoded.error_start.set("No error");
-    else if ((p = find({0x34, 0x6D}, 4)))
-      decoded.error_start.set(datetime(p));
+    if (decoded.raw_error_status.value == 0) decoded.error_start.set("No error");
+  } else {
+    decoded.error_start = {};
   }
-  if ((p = find({0x04, 0x20}, 4))) decoded.battery_operating_duration.set(read_u32(p) / 3600.0f / 24.0f);
-  if ((p = find({0x04, 0x24}, 4))) decoded.operating_time_without_error.set(read_u32(p) / 3600.0f / 24.0f);
-  if ((p = find({0x04, 0x86, 0x3B}, 4))) decoded.energy.set(read_u32(p) / 1000.0f);
-  if ((p = find({0x04, 0x13}, 4))) decoded.volume.set(read_u32(p) / 1000.0f);
-  if ((p = find({0x04, 0x2B}, 4))) decoded.power.set(read_i32(p) / 1000.0f);
-  if ((p = find({0x04, 0x3B}, 4))) decoded.flow.set(read_i32(p) / 1000.0f);
-  if ((p = find({0x02, 0x59}, 2))) decoded.flow_temperature.set(read_i16(p) / 100.0f);
-  if ((p = find({0x02, 0x5D}, 2))) decoded.return_temperature.set(read_i16(p) / 100.0f);
-  if ((p = find({0x02, 0x61}, 2))) decoded.temperature_difference.set(read_i16(p) / 100.0f);
   result = decoded;
   return FrameResult::OK;
 }
@@ -188,7 +237,7 @@ bool FrameReceiver::push(uint8_t byte, MeterData &result, FrameResult &error) {
   this->buffer_[this->size_++] = byte;
   size_t keep = this->size_;
   for (size_t i = 0; i < this->size_; ++i) {
-    if (this->buffer_[i] != 0x68) continue;
+    if (this->buffer_[i] != mbus::LONG_FRAME_START) continue;
     MeterData decoded;
     const auto status = parse_frame(this->buffer_.data() + i, this->size_ - i, decoded);
     if (status == FrameResult::OK) {
