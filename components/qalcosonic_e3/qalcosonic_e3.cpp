@@ -10,13 +10,25 @@
 namespace esphome {
 namespace qalcosonic_e3 {
 static const char *const TAG = "qalcosonic_e3";
+namespace {
+constexpr uint32_t STARTUP_DELAY_MS = 10000;
+constexpr uint32_t POST_ACK_DELAY_MS = 100;
+constexpr uint32_t RESPONSE_TIMEOUT_MS = 2000;
+// Limit UART work per ESPHome loop iteration, independently of the maximum M-Bus frame size.
+constexpr size_t MAX_RX_BYTES_PER_LOOP = 512;
+
+template <typename Entity, typename T>
+void publish_if_present(Entity *entity, const Value<T> &value) {
+  if (entity != nullptr && value.present) entity->publish_state(value.value);
+}
+}  // namespace
 
 void QalcosonicE3::setup() {
   // PollingComponent starts its timer before setup(), even if the switch started off.
   if (!this->automatic_readout_enabled_) this->stop_poller();
   if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(0);
-  this->set_timeout("first_read", 10000, [this]() {
-    this->ready_ = true;
+  this->set_timeout("first_read", STARTUP_DELAY_MS, [this]() {
+    this->readout_state_ = ReadoutState::IDLE;
     this->update();
   });
 }
@@ -37,30 +49,26 @@ void QalcosonicE3::set_automatic_readout_enabled(bool enabled) {
 void QalcosonicE3::read_now() { this->request_read_(); }
 
 void QalcosonicE3::discover_address() {
-  if (!this->ready_ || this->pending_) {
+  if (this->readout_state_ != ReadoutState::IDLE) {
     ESP_LOGW(TAG, "Cannot discover address before startup completes or while a read is pending");
     return;
   }
-  this->manual_discovery_ = true;
+  this->readout_purpose_ = ReadoutPurpose::ADDRESS_DISCOVERY;
   this->link_.start_discovery();
   this->request_read_();
 }
 
 void QalcosonicE3::request_read_() {
-  if (!this->ready_ || this->pending_) return;
+  if (this->readout_state_ != ReadoutState::IDLE) return;
   this->cancel_timeout("post_ack_request");
-  this->waiting_for_data_request_ = false;
   ++this->readout_generation_;
   this->link_.prepare_read(millis() - this->last_link_activity_at_);
   if (this->link_.discovering()) ESP_LOGI(TAG, "Starting M-Bus address discovery using 0xFE");
   // Discard bytes left over from a previous request before starting a new one.
   uint8_t byte;
-  for (size_t i = 0; i < 512 && this->available(); ++i) this->read_byte(&byte);
-  this->receiver_.clear();
-  this->uart_trace_size_ = 0;
-  this->uart_trace_truncated_ = false;
-  this->pending_ = true;
-  this->frame_error_ = FrameResult::INCOMPLETE;
+  for (size_t i = 0; i < MAX_RX_BYTES_PER_LOOP && this->available(); ++i) this->read_byte(&byte);
+  this->reset_receive_attempt_();
+  this->readout_state_ = ReadoutState::WAITING_FOR_REPLY;
   this->send_link_request_();
 }
 
@@ -78,10 +86,11 @@ void QalcosonicE3::log_uart_trace_() {
   ESP_LOGV(TAG, "UART RX: %u byte(s)%s", static_cast<unsigned>(this->uart_trace_size_),
            this->uart_trace_truncated_ ? " (trace truncated)" : "");
   static constexpr char HEX[] = "0123456789ABCDEF";
-  for (size_t offset = 0; offset < this->uart_trace_size_; offset += 32) {
-    char line[32 * 3];
+  static constexpr size_t BYTES_PER_LINE = 32;
+  for (size_t offset = 0; offset < this->uart_trace_size_; offset += BYTES_PER_LINE) {
+    char line[BYTES_PER_LINE * 3];
     size_t length = 0;
-    const size_t end = std::min(offset + 32, this->uart_trace_size_);
+    const size_t end = std::min(offset + BYTES_PER_LINE, this->uart_trace_size_);
     for (size_t i = offset; i < end; ++i) {
       if (i != offset) line[length++] = ' ';
       const uint8_t byte = this->uart_trace_[i];
@@ -94,105 +103,131 @@ void QalcosonicE3::log_uart_trace_() {
 #endif
 }
 
+void QalcosonicE3::reset_receive_attempt_() {
+  this->receiver_.clear();
+  this->uart_trace_size_ = 0;
+  this->uart_trace_truncated_ = false;
+  this->frame_error_ = FrameResult::INCOMPLETE;
+}
+
+void QalcosonicE3::record_uart_byte_(uint8_t byte) {
+  if (this->uart_trace_size_ < this->uart_trace_.size())
+    this->uart_trace_[this->uart_trace_size_++] = byte;
+  else
+    this->uart_trace_truncated_ = true;
+}
+
+void QalcosonicE3::handle_ack_(uint8_t byte) {
+  if (!this->link_.accept_ack(byte)) return;
+  this->last_link_activity_at_ = millis();
+  this->readout_state_ = ReadoutState::ACK_DELAY;
+  const uint32_t generation = this->readout_generation_;
+  ESP_LOGD(TAG, "Scheduling M-Bus REQ_UD2 100 ms after SND_NKE acknowledgement");
+  this->set_timeout("post_ack_request", POST_ACK_DELAY_MS, [this, generation]() {
+    if (generation != this->readout_generation_ || this->readout_state_ != ReadoutState::ACK_DELAY) return;
+    this->readout_state_ = ReadoutState::WAITING_FOR_REPLY;
+    if (this->link_.needs_reset() || this->link_.awaiting_ack()) return;
+    this->send_link_request_();
+  });
+}
+
+void QalcosonicE3::handle_response_(const MeterData &data) {
+  const bool discovering = this->link_.discovering();
+  const uint8_t requested_address = this->link_.request_address();
+  if (!this->link_.accept_response(data.response_address)) {
+    ESP_LOGW(TAG, "Ignoring M-Bus response from address 0x%02X; expected 0x%02X", data.response_address,
+             requested_address);
+    return;
+  }
+  if (discovering) {
+    ESP_LOGI(TAG, "Discovered M-Bus primary address: 0x%02X", data.response_address);
+    if (this->link_.auto_address())
+      ESP_LOGI(TAG, "Using discovered M-Bus address 0x%02X", this->link_.address());
+    else
+      ESP_LOGI(TAG, "Keeping configured M-Bus address 0x%02X", this->link_.configured_address());
+  } else if (requested_address == mbus::POINT_TO_POINT_ADDRESS)
+    ESP_LOGI(TAG, "Meter responded with primary address 0x%02X", data.response_address);
+  this->readout_state_ = ReadoutState::IDLE;
+  this->log_uart_trace_();
+  this->last_link_activity_at_ = millis();
+  if (this->readout_purpose_ == ReadoutPurpose::ADDRESS_DISCOVERY) {
+    this->readout_purpose_ = ReadoutPurpose::MEASUREMENTS;
+    return;  // Manual discovery only reports the address, not measurements.
+  }
+  this->consecutive_failures_ = 0;
+  this->measurements_invalidated_ = false;
+  if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(0);
+  this->publish_(data);
+  if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(true);
+  ESP_LOGD(TAG, "QALCOSONIC E3 frame processed successfully");
+}
+
+void QalcosonicE3::retry_readout_() {
+  // Continue the same logical readout; only exhaustion updates diagnostics.
+  ESP_LOGD(TAG, "Retrying M-Bus REQ_UD2 with the same FCB");
+  this->reset_receive_attempt_();
+  this->send_link_request_();
+}
+
+void QalcosonicE3::finish_failed_readout_(bool awaiting_ack) {
+  if (this->consecutive_failures_ != std::numeric_limits<uint32_t>::max()) ++this->consecutive_failures_;
+  if (this->unavailable_after_failures_ != 0 && !this->measurements_invalidated_ &&
+      this->consecutive_failures_ >= this->unavailable_after_failures_) {
+    this->invalidate_measurements_();
+    this->measurements_invalidated_ = true;
+  }
+  if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(this->consecutive_failures_);
+  if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(false);
+  if (this->frame_error_ != FrameResult::INCOMPLETE) ESP_LOGW(TAG, "%s", frame_result_message(this->frame_error_));
+  ESP_LOGW(TAG, "%s within 2 seconds (%u buffered bytes); consecutive readout failures=%lu",
+           awaiting_ack ? "No SND_NKE acknowledgement" : "No valid response",
+           static_cast<unsigned>(this->receiver_.size()), static_cast<unsigned long>(this->consecutive_failures_));
+  this->receiver_.clear();
+}
+
+void QalcosonicE3::handle_timeout_() {
+  // Unsigned subtraction remains correct across millis() wraparound.
+  if (this->readout_state_ != ReadoutState::WAITING_FOR_REPLY || millis() - this->requested_at_ < RESPONSE_TIMEOUT_MS)
+    return;
+  this->log_uart_trace_();
+  const bool awaiting_ack = this->link_.awaiting_ack();
+  this->link_.timeout();
+  if (!this->link_.needs_reset()) {
+    this->retry_readout_();
+    return;
+  }
+  this->readout_state_ = ReadoutState::IDLE;
+  if (this->readout_purpose_ == ReadoutPurpose::ADDRESS_DISCOVERY) {
+    this->link_.end_discovery();
+    this->readout_purpose_ = ReadoutPurpose::MEASUREMENTS;
+    ESP_LOGW(TAG, "M-Bus address discovery timed out; active address remains 0x%02X", this->link_.address());
+    this->receiver_.clear();
+    return;
+  }
+  this->finish_failed_readout_(awaiting_ack);
+}
+
 void QalcosonicE3::loop() {
   // Bound work per loop even when the UART is continuously receiving noise.
-  for (size_t i = 0; i < 512 && this->available(); ++i) {
+  for (size_t i = 0; i < MAX_RX_BYTES_PER_LOOP && this->available(); ++i) {
     uint8_t byte;
     if (!this->read_byte(&byte)) break;
-    if (!this->pending_) continue;
-    if (this->uart_trace_size_ < this->uart_trace_.size())
-      this->uart_trace_[this->uart_trace_size_++] = byte;
-    else
-      this->uart_trace_truncated_ = true;
-    if (this->waiting_for_data_request_) continue;
+    if (!this->readout_pending_()) continue;
+    this->record_uart_byte_(byte);
+    if (this->readout_state_ == ReadoutState::ACK_DELAY) continue;
     if (this->link_.awaiting_ack()) {
-      if (this->link_.accept_ack(byte)) {
-        this->last_link_activity_at_ = millis();
-        this->waiting_for_data_request_ = true;
-        const uint32_t generation = this->readout_generation_;
-        ESP_LOGD(TAG, "Scheduling M-Bus REQ_UD2 100 ms after SND_NKE acknowledgement");
-        this->set_timeout("post_ack_request", 100, [this, generation]() {
-          if (generation != this->readout_generation_ || !this->pending_ || !this->waiting_for_data_request_) return;
-          this->waiting_for_data_request_ = false;
-          if (this->link_.needs_reset() || this->link_.awaiting_ack()) return;
-          this->send_link_request_();
-        });
-      }
+      this->handle_ack_(byte);
       continue;
     }
     MeterData data;
     FrameResult error;
-    if (this->receiver_.push(byte, data, error)) {
-      const bool discovering = this->link_.discovering();
-      const uint8_t requested_address = this->link_.request_address();
-      if (!this->link_.accept_response(data.response_address)) {
-        ESP_LOGW(TAG, "Ignoring M-Bus response from address 0x%02X; expected 0x%02X", data.response_address,
-                 requested_address);
-        continue;
-      }
-      if (discovering) {
-        ESP_LOGI(TAG, "Discovered M-Bus primary address: 0x%02X", data.response_address);
-        if (this->link_.auto_address())
-          ESP_LOGI(TAG, "Using discovered M-Bus address 0x%02X", this->link_.address());
-        else
-          ESP_LOGI(TAG, "Keeping configured M-Bus address 0x%02X", this->link_.configured_address());
-      } else if (requested_address == 0xFE)
-        ESP_LOGI(TAG, "Meter responded with primary address 0x%02X", data.response_address);
-      this->pending_ = false;
-      this->log_uart_trace_();
-      this->last_link_activity_at_ = millis();
-      if (this->manual_discovery_) {
-        this->manual_discovery_ = false;
-        continue;  // Manual discovery only reports the address, not measurements.
-      }
-      this->consecutive_failures_ = 0;
-      this->measurements_invalidated_ = false;
-      if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(0);
-      this->publish_(data);
-      if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(true);
-      ESP_LOGD(TAG, "QALCOSONIC E3 frame processed successfully");
-    } else if (error != FrameResult::INCOMPLETE && this->frame_error_ == FrameResult::INCOMPLETE) {
+    if (this->receiver_.push(byte, data, error))
+      this->handle_response_(data);
+    else if (error != FrameResult::INCOMPLETE && this->frame_error_ == FrameResult::INCOMPLETE)
       this->frame_error_ = error;
-    }
   }
   // Process already-buffered UART data before declaring a request timed out.
-  // Unsigned subtraction remains correct across millis() wraparound.
-  if (this->pending_ && !this->waiting_for_data_request_ && millis() - this->requested_at_ >= 2000) {
-    this->log_uart_trace_();
-    const bool awaiting_ack = this->link_.awaiting_ack();
-    this->link_.timeout();
-    if (!this->link_.needs_reset()) {
-      // Continue the same logical readout; only exhaustion updates diagnostics.
-      ESP_LOGD(TAG, "Retrying M-Bus REQ_UD2 with the same FCB");
-      this->receiver_.clear();
-      this->uart_trace_size_ = 0;
-      this->uart_trace_truncated_ = false;
-      this->frame_error_ = FrameResult::INCOMPLETE;
-      this->send_link_request_();
-      return;
-    }
-    this->pending_ = false;
-    if (this->manual_discovery_) {
-      this->link_.end_discovery();
-      this->manual_discovery_ = false;
-      ESP_LOGW(TAG, "M-Bus address discovery timed out; active address remains 0x%02X", this->link_.address());
-      this->receiver_.clear();
-      return;
-    }
-    if (this->consecutive_failures_ != std::numeric_limits<uint32_t>::max()) ++this->consecutive_failures_;
-    if (this->unavailable_after_failures_ != 0 && !this->measurements_invalidated_ &&
-        this->consecutive_failures_ >= this->unavailable_after_failures_) {
-      this->invalidate_measurements_();
-      this->measurements_invalidated_ = true;
-    }
-    if (this->readout_failures_ != nullptr) this->readout_failures_->publish_state(this->consecutive_failures_);
-    if (this->readout_successful_ != nullptr) this->readout_successful_->publish_state(false);
-    if (this->frame_error_ != FrameResult::INCOMPLETE) ESP_LOGW(TAG, "%s", frame_result_message(this->frame_error_));
-    ESP_LOGW(TAG, "%s within 2 seconds (%u buffered bytes); consecutive readout failures=%lu",
-             awaiting_ack ? "No SND_NKE acknowledgement" : "No valid response",
-             static_cast<unsigned>(this->receiver_.size()), static_cast<unsigned long>(this->consecutive_failures_));
-    this->receiver_.clear();
-  }
+  this->handle_timeout_();
 }
 
 void QalcosonicE3::invalidate_measurements_() {
@@ -204,26 +239,19 @@ void QalcosonicE3::invalidate_measurements_() {
 }
 
 void QalcosonicE3::publish_(const MeterData &data) {
-  if (this->energy_ != nullptr && data.energy.present) this->energy_->publish_state(data.energy.value);
-  if (this->volume_ != nullptr && data.volume.present) this->volume_->publish_state(data.volume.value);
-  if (this->power_ != nullptr && data.power.present) this->power_->publish_state(data.power.value);
-  if (this->flow_ != nullptr && data.flow.present) this->flow_->publish_state(data.flow.value);
-  if (this->flow_temperature_ != nullptr && data.flow_temperature.present)
-    this->flow_temperature_->publish_state(data.flow_temperature.value);
-  if (this->return_temperature_ != nullptr && data.return_temperature.present)
-    this->return_temperature_->publish_state(data.return_temperature.value);
-  if (this->temperature_difference_ != nullptr && data.temperature_difference.present)
-    this->temperature_difference_->publish_state(data.temperature_difference.value);
-  if (this->error_code_ != nullptr && data.error_code.present) this->error_code_->publish_state(data.error_code.value);
-  if (this->battery_operating_duration_ != nullptr && data.battery_operating_duration.present)
-    this->battery_operating_duration_->publish_state(data.battery_operating_duration.value);
-  if (this->operating_time_without_error_ != nullptr && data.operating_time_without_error.present)
-    this->operating_time_without_error_->publish_state(data.operating_time_without_error.value);
+  publish_if_present(this->energy_, data.energy);
+  publish_if_present(this->volume_, data.volume);
+  publish_if_present(this->power_, data.power);
+  publish_if_present(this->flow_, data.flow);
+  publish_if_present(this->flow_temperature_, data.flow_temperature);
+  publish_if_present(this->return_temperature_, data.return_temperature);
+  publish_if_present(this->temperature_difference_, data.temperature_difference);
+  publish_if_present(this->error_code_, data.error_code);
+  publish_if_present(this->battery_operating_duration_, data.battery_operating_duration);
+  publish_if_present(this->operating_time_without_error_, data.operating_time_without_error);
   if (this->protocol_version_ != nullptr) this->protocol_version_->publish_state(data.protocol_version);
-  if (this->meter_datetime_ != nullptr && data.meter_datetime.present)
-    this->meter_datetime_->publish_state(data.meter_datetime.value);
-  if (this->error_start_ != nullptr && data.error_start.present)
-    this->error_start_->publish_state(data.error_start.value);
+  publish_if_present(this->meter_datetime_, data.meter_datetime);
+  publish_if_present(this->error_start_, data.error_start);
   if (this->serial_number_ != nullptr) this->serial_number_->publish_state(data.serial_number);
   if (this->manufacturer_ != nullptr) this->manufacturer_->publish_state(data.manufacturer);
 }

@@ -18,6 +18,56 @@ void checksum(std::vector<uint8_t> &frame) {
   for (size_t i = 4; i < frame.size() - 2; ++i) sum += frame[i];
   frame[frame.size() - 2] = sum;
 }
+
+void test_record_traversal(const std::vector<uint8_t> &header) {
+  auto decode = [&](std::initializer_list<uint8_t> records) {
+    std::vector<uint8_t> frame(header.begin(), header.begin() + 19);
+    frame.insert(frame.end(), records);
+    frame.insert(frame.end(), {0, 0x16});
+    frame[1] = frame[2] = static_cast<uint8_t>(frame.size() - 6);
+    checksum(frame);
+    MeterData data;
+    assert(parse_frame(frame.data(), frame.size(), data) == FrameResult::OK);
+    return data;
+  };
+
+  // Filler and unknown records with DIF/VIF extensions must preserve boundaries.
+  auto data = decode({0x2F, 0x84, 0x80, 0x00, 0x13, 1,    2,    3,    4,    0x04, 0x80, 0x80, 0x00,
+                      1,    2,    3,    4,    0x00, 0x13, 0x04, 0x13, 0xE8, 0x03, 0,    0});
+  near(data.volume, 1.0f);
+
+  // Variable-length values may contain bytes that look like supported headers.
+  for (uint8_t length : {0x03, 0xC3, 0xD3, 0xE3}) {
+    data = decode({0x0D, 0x78, length, 0x04, 0x13, 0xFF, 0x04, 0x13, 0xE8, 0x03, 0, 0});
+    near(data.volume, 1.0f);
+  }
+
+  // The first occurrence wins, including status records with different values.
+  data = decode({0x04, 0x13, 0xE8, 0x03, 0, 0, 0x04, 0x13, 0xD0, 0x07, 0, 0, 0x34,
+                 0xFD, 0x17, 0,    0,    0, 0, 0x34, 0xFD, 0x17, 0,    0, 0, 0x04});
+  near(data.volume, 1.0f);
+  assert(data.raw_error_status.present && data.raw_error_status.value == 0);
+  assert(data.error_code.value == "0000" && data.error_start.value == "No error");
+
+  const std::initializer_list<uint8_t> timestamp_first = {0x34, 0x6D, 0, 0, 1, 1, 0x34, 0xFD, 0x17, 0, 0, 0, 0x04};
+  const std::initializer_list<uint8_t> status_first = {0x34, 0xFD, 0x17, 0, 0, 0, 0x04, 0x34, 0x6D, 0, 0, 1, 1};
+  for (auto records : {timestamp_first, status_first}) {
+    data = decode(records);
+    assert(data.error_code.value == "4000");
+    assert(data.error_start.present && data.error_start.value == "2000-01-01 00:00");
+  }
+  data = decode({0x34, 0x6D, 0, 0, 1, 1});
+  assert(!data.error_start.present);  // Error start requires a status record.
+
+  // Preserve values before a truncated record or manufacturer-specific tail.
+  data = decode({0x04, 0x13, 0xE8, 0x03, 0, 0, 0x04, 0x3B, 1, 2});
+  near(data.volume, 1.0f);
+  assert(!data.flow.present);
+  data = decode({0x04, 0x13, 0xE8, 0x03, 0, 0, 0x0F, 0x04, 0x3B, 1, 2, 3, 4});
+  near(data.volume, 1.0f);
+  assert(!data.flow.present);
+}
+
 struct FixtureCase {
   const char *path;
   uint8_t response_address;
@@ -184,6 +234,7 @@ int main() {
   // Reuse the nominal captures for the synthetic parser and link tests below.
   const auto &frame = frames[0];
   const auto &wired = frames[1];
+  test_record_traversal(frame);
   auto find_pattern = [](std::vector<uint8_t> &bytes, std::initializer_list<uint8_t> pattern) {
     return std::search(bytes.begin(), bytes.end(), pattern.begin(), pattern.end());
   };
