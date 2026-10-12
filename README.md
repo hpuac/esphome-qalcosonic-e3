@@ -13,21 +13,27 @@ timeout, making it better suited to permanent unattended installations.
 
 ## Hardware
 
-The tested setup uses an **Axioma QALCOSONIC E3**, a **Waveshare ESP32-C6-Zero**
-with 8 MB flash, and a **TTL optical read/write head** powered from 3.3 V.
+Both tested setups use an **Axioma QALCOSONIC E3** and a
+[**Waveshare ESP32-C6-Zero**](https://www.amazon.de/dp/B0F12PRH9G) with 8 MB flash:
 
-- [TTL IR read/write head](https://www.ebay.de/itm/356650595031)
-- [Waveshare ESP32-C6-Zero](https://www.amazon.de/dp/B0F12PRH9G)
+- **Optical:** a [TTL IR read/write head](https://www.ebay.de/itm/356650595031)
+  powered from 3.3 V. See [optical wiring](#optical-wiring).
+- **Wired:** a [Zihatec M-BUS Master Module](https://www.hwhardsoft.de/2024/10/08/m-bus-master-breakout/)
+  with 3.3 V digital logic and its M-Bus side powered from the board's 5 V rail
+  or a separate supply. See [wired M-Bus hardware and wiring](#wired-m-bus-hardware).
 
-Other ESPHome-supported boards and compatible TTL heads should work with the
-appropriate board configuration and wiring. The head must support both sending
-and receiving, with logic levels compatible with the board. Communication uses
-**2400 baud, 8E1**. The decoded data is specific to the QALCOSONIC E3.
+Other ESPHome-supported boards and compatible interfaces should work with the
+appropriate board configuration and wiring. The UART interface must support
+both sending and receiving, with logic levels compatible with the board.
+Both transports use **2400 baud, 8E1**; wired M-Bus requires a proper master/transceiver.
+The decoded data is specific to the QALCOSONIC E3.
 
 ## Installation and configuration
 
 The following configuration enables the main measurements, readout
-status, automatic readout switch, and manual read button:
+status, automatic readout switch, and manual read button. Choose `optical` or
+`wired` for your hardware, and set its primary address or use `auto` to discover
+it with exactly one connected meter:
 
 ```yaml
 esphome:
@@ -71,9 +77,9 @@ uart:
 
 qalcosonic_e3:
   uart_id: mbus_uart
-  transport: optical
-  address: 0x01
-  update_interval: 2min
+  transport: optical # Use wired for an M-Bus master/transceiver.
+  address: 0x01 # Your interface's primary address, or auto (one connected meter).
+  update_interval: 2min # Optical: keep below the inactivity timeout; wired: e.g. 15min.
   energy:
     name: "Energy"
   flow:
