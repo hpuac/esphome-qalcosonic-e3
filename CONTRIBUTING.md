@@ -27,6 +27,19 @@ readout; a missing initialization acknowledgement ends the readout immediately
 after its two-second timeout. Manual discovery uses the same flow but reports
 the address without publishing measurements or changing readout diagnostics.
 
+### Address handling and request frames
+
+Auto and manual discovery send SND_NKE and REQ_UD2 to `0xFE`. Discovery accepts
+only normal primary response addresses (`0x00`–`0xFA`). Explicit `address: 0xFE`
+uses the same response-address validation. Targeted requests accept only the
+active primary address; other responses are ignored while waiting until timeout.
+After successful discovery, the first targeted read initializes a fresh link
+session at the active address.
+
+Short requests use checksum `(control + address) & 0xFF`. SND_NKE uses control
+`0x40`; REQ_UD2 alternates `0x7B` / `0x5B`, starting with `0x7B` after link
+initialization. Retries preserve the same frame count bit.
+
 `Value<T>::present` distinguishes a missing record from a received zero. Missing
 values leave existing entity states unchanged. The parser currently keeps values
 decoded before a truncated record or an unsupported variable-length encoding;
