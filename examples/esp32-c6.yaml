@@ -41,9 +41,9 @@ uart:
 
 qalcosonic_e3:
   uart_id: mbus_uart
-  transport: optical
-  address: 0x01 # Tested optical address; use your wired address (tested: 0x2C).
-  update_interval: 2min
+  transport: optical # Use wired for an M-Bus master/transceiver.
+  address: 0x01 # Your interface's primary address, or auto (one connected meter).
+  update_interval: 2min # Optical: keep below the inactivity timeout; wired: e.g. 15min.
   unavailable_after_failures: 5
   energy:
     name: "Energy"
