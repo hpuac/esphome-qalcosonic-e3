@@ -139,7 +139,8 @@ TEXT_SENSORS = {
         )
     ),
 }
-CONFIG_SCHEMA = (
+CONFIG_SCHEMA = cv.All(
+    cv.require_esphome_version(2026, 9, 0),
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(QalcosonicE3),
@@ -165,7 +166,7 @@ CONFIG_SCHEMA = (
         }
     )
     .extend(cv.polling_component_schema("2min"))
-    .extend(uart.UART_DEVICE_SCHEMA)
+    .extend(uart.UART_DEVICE_SCHEMA),
 )
 
 FINAL_VALIDATE_SCHEMA = uart.final_validate_device_schema(

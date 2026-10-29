@@ -30,6 +30,8 @@ The decoded data is specific to the QALCOSONIC E3.
 
 ## Installation and configuration
 
+Requires **ESPHome 2026.9.0 or newer**.
+
 The following configuration enables the main measurements, readout
 status, automatic readout switch, and manual read button. Choose `optical` or
 `wired` for your hardware, and set its primary address or use `auto` to discover

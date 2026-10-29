@@ -13,9 +13,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  tests:
+  native:
+    name: Parser and receiver
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -25,16 +26,30 @@ jobs:
       - name: Parser and receiver tests
         run: ./tests/run.sh
 
+  tests:
+    name: ESPHome ${{ matrix.esphome }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        esphome: ["minimum", "latest"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Set up Python
         id: setup-python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: requirements/esphome-${{ matrix.esphome }}/requirements.txt
 
       - name: Install test dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: python -m pip install -r requirements/esphome-${{ matrix.esphome }}/requirements.txt
 
       - name: Configuration schema tests
         run: python tests/test_config.py
@@ -51,7 +66,7 @@ jobs:
           path: ~/.cache/esphome/idf
           # The IDF cache includes a Python environment tied to this interpreter.
           key: >-
-            esphome-idf-v1-${{ env.ImageOS }}-${{ runner.arch }}-python-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements-dev.txt', 'tests/esp32-c6.yaml') }}
+            esphome-idf-v1-${{ env.ImageOS }}-${{ runner.arch }}-python-${{ steps.setup-python.outputs.python-version }}-${{ matrix.esphome }}-${{ hashFiles(format('requirements/esphome-{0}/requirements.txt', matrix.esphome), 'tests/esp32-c6.yaml') }}
 
       - name: Compile ESP32-C6 firmware
         run: python -m esphome compile tests/esp32-c6.yaml

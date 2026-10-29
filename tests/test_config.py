@@ -1,13 +1,29 @@
 """Exercise nested entity defaults and UART validation using real ESPHome."""
 
+import runpy
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
+import esphome.config_validation as cv
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Check the support boundary without installing an unsupported ESPHome release.
+schema = runpy.run_path(str(ROOT / "components/qalcosonic_e3/__init__.py"))["CONFIG_SCHEMA"]
+minimum_config = {"address": 0x01, "transport": "optical", "uart_id": "mbus_uart"}
+with patch.object(cv, "ESPHOME_VERSION", "2026.9.0"):
+    assert schema(minimum_config)["address"] == 0x01
+with patch.object(cv, "ESPHOME_VERSION", "2026.8.3"):
+    try:
+        schema(minimum_config)
+    except cv.Invalid as error:
+        assert "requires at least ESPHome version 2026.9.0" in str(error), error
+    else:
+        raise AssertionError("An unsupported ESPHome version was accepted")
 
 
 class TestConfigLoader(yaml.SafeLoader):
