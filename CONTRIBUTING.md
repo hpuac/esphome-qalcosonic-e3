@@ -99,6 +99,11 @@ The path is relative to your device YAML.
 
 ## Tests
 
+Local development uses the minimum supported ESPHome version, **2026.9.0**.
+CI checks configuration and firmware builds with this minimum and the
+[current stable pin](requirements/esphome-latest/requirements.txt).
+Dependabot updates only the current pin; the minimum stays fixed.
+
 Run parser and receiver tests with a C++17 compiler (UndefinedBehaviorSanitizer
 enabled by default):
 
@@ -108,7 +113,7 @@ enabled by default):
 SANITIZERS=address,undefined ./tests/run.sh
 ```
 
-Validate and build against the ESPHome version pinned in
+Validate and build against the default development version selected by
 [requirements-dev.txt](requirements-dev.txt):
 
 ```sh
@@ -116,6 +121,10 @@ Validate and build against the ESPHome version pinned in
 .venv/bin/esphome config tests/esp32-c6.yaml
 .venv/bin/esphome compile tests/esp32-c6.yaml
 ```
+
+To test the current stable version, first run
+`.venv/bin/pip install -r requirements/esphome-latest/requirements.txt`.
+Reinstall `requirements-dev.txt` to switch back to the minimum.
 
 The test configuration uses local component sources. The included
 [`tests/secrets.yaml`](tests/secrets.yaml) supplies public dummy credentials for

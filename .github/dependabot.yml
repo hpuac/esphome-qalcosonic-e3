@@ -4,6 +4,14 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Keep the development minimum fixed; update the latest CI pin separately.
+    ignore:
+      - dependency-name: "esphome"
+
+  - package-ecosystem: "pip"
+    directory: "/requirements/esphome-latest"
+    schedule:
+      interval: "weekly"
 
   - package-ecosystem: "github-actions"
     directory: "/"
